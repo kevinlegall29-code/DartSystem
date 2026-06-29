@@ -414,7 +414,10 @@
   }
 
   function connectWS(wsUrl) {
-    if (ws) ws.close();
+    if (ws && ws.readyState !== WebSocket.CLOSED) {
+      ws.onclose = null;  // Ne pas retriggerer la reconnexion
+      ws.close();
+    }
     ws = new WebSocket(`${wsUrl}/game/ws`);
 
     ws.onopen = () => {
