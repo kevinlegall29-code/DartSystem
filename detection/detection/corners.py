@@ -1,5 +1,7 @@
 """
 Localisation de la fléchette par Harris corner detection sur la diff d'image.
+Retourne les corners filtrés en espace caméra — la pointe est déterminée
+APRÈS transformation homographique dans l'espace normalisé.
 """
 
 import cv2
@@ -9,22 +11,24 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Distance maximale au centre du cluster de corners (filtre outliers)
 MAX_CLUSTER_SPREAD = 180
-# Distance maximale d'un corner à la droite ajustée (filtre bruit)
-MAX_LINE_DISTANCE = 40
-# Nombre minimum de voisins pour valider un point de localisation
-MIN_NEIGHBORS = 3
-NEIGHBOR_RADIUS = 40
+MAX_LINE_DISTANCE  = 40
 
 
 @dataclass
 class DartLocation:
-    """Position brute de la fléchette dans l'image caméra (coordonnées pixels)."""
-    x: float
-    y: float
-    confidence: float   # 0.0 – 1.0 basé sur le nombre de corners cohérents
+    """Ensemble de corners filtrés en espace caméra."""
+    corners: np.ndarray  # Nx2, coordonnées pixels caméra
+    confidence: float
     corners_count: int
+
+    @property
+    def x(self) -> float:
+        return float(self.corners[:, 0].mean())
+
+    @property
+    def y(self) -> float:
+        return float(self.corners[:, 1].mean())
 
 
 def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartLocation | None:
@@ -37,33 +41,18 @@ def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartL
     """
     corners = _get_harris_corners(diff_frame)
     if corners is None or len(corners) < 5:
-        logger.debug("Pas assez de corners détectés")
         return None
 
     corners = _filter_outliers(corners)
     if corners is None or len(corners) < 3:
-        logger.debug("Pas assez de corners après filtrage outliers")
         return None
 
     corners = _filter_by_line(corners, diff_frame.shape)
     if corners is None or len(corners) < 2:
-        logger.debug("Pas assez de corners après filtrage ligne")
         return None
-
-    location = _find_tip(corners, camera_side)
-    if location is None:
-        return None
-
-    neighbors = _count_neighbors(location, corners)
-    if neighbors < MIN_NEIGHBORS:
-        logger.debug(f"Point isolé ({neighbors} voisins < {MIN_NEIGHBORS})")
-        # Essaie le deuxième candidat
-        location = _find_tip_fallback(corners, camera_side, location)
-        if location is None:
-            return None
 
     confidence = min(1.0, len(corners) / 50.0)
-    return DartLocation(x=float(location[0]), y=float(location[1]),
+    return DartLocation(corners=corners.reshape(-1, 2).astype(float),
                         confidence=confidence, corners_count=len(corners))
 
 
@@ -115,24 +104,5 @@ def _filter_by_line(corners: np.ndarray, shape: tuple) -> np.ndarray | None:
     return filtered if len(filtered) > 0 else None
 
 
-def _find_tip(corners: np.ndarray, camera_side: str) -> np.ndarray | None:
-    """
-    La pointe est le point du cluster de corners LE PLUS PROCHE du centre du board
-    dans l'image caméra (la pointe est enfoncée dans la cible, le fût s'éloigne).
-    Le centre approximatif de la cible dans l'image = centre de l'image caméra.
-    """
-    pts = corners.reshape(-1, 2).astype(float)
-    board_center = np.array([640.0, 360.0])  # Centre approx pour 1280x720
-
-    distances = np.linalg.norm(pts - board_center, axis=1)
-    # Moyenne des 20% de points les plus proches du centre = zone de la pointe
-    n = max(1, len(distances) // 5)
-    closest_idx = np.argsort(distances)[:n]
-    tip = pts[closest_idx].mean(axis=0)
-    return tip
 
 
-def _count_neighbors(point: np.ndarray, corners: np.ndarray) -> int:
-    pts = corners.reshape(-1, 2)
-    distances = np.abs(pts[:, 0] - point[0]) + np.abs(pts[:, 1] - point[1])
-    return int(np.sum(distances < NEIGHBOR_RADIUS))

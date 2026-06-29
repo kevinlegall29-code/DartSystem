@@ -29,12 +29,34 @@ class FusedDartResult:
     agreement: bool                 # Les caméras étaient-elles cohérentes ?
 
 
-def transform_to_normalized(location: DartLocation, homography: np.ndarray) -> tuple[float, float]:
-    """Transforme une position brute caméra → espace normalisé 800×800."""
-    pt = np.array([[[location.x, location.y]]], dtype=np.float32)
-    transformed = cv2.perspectiveTransform(pt, homography)  # noqa: F821
-    x, y = transformed[0][0]
-    return float(x), float(y)
+BOARD_CENTER_NORM = np.array([400.0, 400.0])
+
+
+def find_tip_normalized(location: DartLocation, homography: np.ndarray) -> tuple[float, float] | None:
+    """
+    Transforme TOUS les corners en espace normalisé et retourne la pointe :
+    le point le plus proche du centre du board (400, 400).
+    La pointe est enfoncée dans le board = la plus proche du centre en espace normalisé.
+    """
+    pts = location.corners.reshape(-1, 1, 2).astype(np.float32)
+    transformed = cv2.perspectiveTransform(pts, homography)
+    pts_norm = transformed.reshape(-1, 2)
+
+    # Filtre les points en dehors du board (magnitude > 380px)
+    distances = np.linalg.norm(pts_norm - BOARD_CENTER_NORM, axis=1)
+    valid = distances < 380
+    if not valid.any():
+        # Aucun point dans le board — prend quand même le plus proche
+        pass
+    else:
+        pts_norm = pts_norm[valid]
+        distances = distances[valid]
+
+    # Moyenne des 20% de corners les plus proches du centre = zone de la pointe
+    n = max(1, len(distances) // 5)
+    tip_idx = np.argsort(distances)[:n]
+    tip = pts_norm[tip_idx].mean(axis=0)
+    return float(tip[0]), float(tip[1])
 
 
 def fuse_detections(
@@ -57,8 +79,10 @@ def fuse_detections(
         if cam_idx not in homographies:
             continue
         try:
-            x_n, y_n = transform_to_normalized(loc, homographies[cam_idx])
-            # Rejette les points hors de la zone valide
+            result = find_tip_normalized(loc, homographies[cam_idx])
+            if result is None:
+                continue
+            x_n, y_n = result
             if 0 <= x_n <= 800 and 0 <= y_n <= 800:
                 normalized[cam_idx] = (x_n, y_n)
                 confidences[cam_idx] = loc.confidence
