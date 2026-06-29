@@ -94,8 +94,8 @@ def _filter_by_line(corners: np.ndarray, shape: tuple) -> np.ndarray | None:
         return corners
 
     pts = corners.reshape(-1, 1, 2).astype(np.float32)
-    vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_HUBER, 0, 0.01, 0.01)
-    vx, vy, x0, y0 = float(vx), float(vy), float(x0), float(y0)
+    line = cv2.fitLine(pts, cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
+    vx, vy, x0, y0 = float(line[0]), float(line[1]), float(line[2]), float(line[3])
 
     h, w = shape[:2]
     p1 = np.array([0.0, y0 + (-x0) * (vy / vx) if vx != 0 else y0])
