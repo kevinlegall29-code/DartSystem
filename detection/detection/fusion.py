@@ -138,58 +138,65 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    # Pointe par caméra : corners[0] = pointe (bout fin), identifiée par l'épaisseur.
-    tips = {}        # cam_idx -> (point_norm, longueur)
-    for cam_idx, (p, d, length) in zip(cam_indices, lines):
+    # CONSENSUS INTER-CAMÉRAS sur les DEUX bouts de chaque fléchette.
+    # La vraie pointe se projette au même endroit depuis toutes les caméras ;
+    # les flights (hors plan) divergent. On choisit donc, pour chaque caméra,
+    # le bout qui converge avec les autres → redondance robuste.
+    AGREE_TOL = 75   # px
+
+    # 2 candidats normalisés par caméra (pointe + flight, ordre incertain)
+    cand = {}   # cam_idx -> [pt_norm, pt_norm]
+    for cam_idx in cam_indices:
         loc = detections[cam_idx]
-        tip_cam = loc.corners[0].reshape(1, 1, 2).astype(np.float32)
-        tip_norm = cv2.perspectiveTransform(tip_cam, homographies[cam_idx])[0][0]
-        tip = (float(tip_norm[0]), float(tip_norm[1]))
-        tips[cam_idx] = (np.array(tip), length)
-        s = position_to_score(*tip)
-        logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) L={length:.0f} → {s.label}")
+        ends = loc.corners[:2].reshape(-1, 1, 2).astype(np.float32)
+        tr = cv2.perspectiveTransform(ends, homographies[cam_idx]).reshape(-1, 2)
+        cand[cam_idx] = [tr[0], tr[1]]
+        for k, p in enumerate(tr):
+            s = position_to_score(float(p[0]), float(p[1]))
+            logger.info(f"[CAM{cam_idx}] bout{k}=({p[0]:.0f},{p[1]:.0f}) → {s.label}")
 
-    if not tips:
-        return None
+    # Pour chaque candidat, cherche le bout le plus proche dans CHAQUE autre caméra.
+    # Le meilleur groupe = celui avec le plus de caméras d'accord, puis le plus serré.
+    best_group = None
+    best_key = (0, 1e9)   # (nb caméras, -écart) → on maximise caméras puis minimise écart
+    for ci in cam_indices:
+        for pi in cand[ci]:
+            group = [pi]
+            cams_used = [ci]
+            for cj in cam_indices:
+                if cj == ci:
+                    continue
+                nearest = min(cand[cj], key=lambda q: np.linalg.norm(q - pi))
+                if np.linalg.norm(nearest - pi) < AGREE_TOL:
+                    group.append(nearest)
+                    cams_used.append(cj)
+            if len(cams_used) >= 2:
+                spread = max(np.linalg.norm(a - b) for a in group for b in group)
+                key = (len(cams_used), -spread)
+                if key > best_key:
+                    best_key = key
+                    best_group = (np.mean(group, axis=0), cams_used)
 
-    AGREE_TOL = 70   # px : 2 pointes plus proches que ça = même fléchette
-
-    # Cherche le plus grand groupe de caméras dont les pointes s'accordent.
-    cam_list = list(tips.keys())
-    best_group = []
-    for ci in cam_list:
-        tip_i = tips[ci][0]
-        group = [ci]
-        for cj in cam_list:
-            if cj == ci:
-                continue
-            if np.linalg.norm(tips[cj][0] - tip_i) < AGREE_TOL:
-                group.append(cj)
-        if len(group) > len(best_group):
-            best_group = group
-
-    if len(best_group) >= 2:
-        # 2+ caméras d'accord → moyenne de leurs pointes (robuste, fiable)
-        pts = np.array([tips[c][0] for c in best_group])
-        final = pts.mean(axis=0)
-        used = best_group
+    if best_group is not None:
+        final, used = best_group
         confidence = 0.9
+        agreement = True
     else:
-        # Aucun accord → fait confiance à la caméra avec la plus longue vue
-        best_cam = max(tips.keys(), key=lambda c: tips[c][1])
-        final = tips[best_cam][0]
+        # Aucun accord : fallback sur le bout fin (pointe) de la plus longue vue
+        best_cam = max(cam_indices, key=lambda c: dict(zip(cam_indices, [l[2] for l in lines]))[c])
+        final = cand[best_cam][0]
         used = [best_cam]
         confidence = 0.5
+        agreement = False
 
     x_final, y_final = float(final[0]), float(final[1])
     score = position_to_score(x_final, y_final)
-    logger.info(f"FUSION cams {used} (accord={len(best_group)>=2}) → "
+    logger.info(f"FUSION cams {used} (accord={agreement}) → "
                 f"({x_final:.0f},{y_final:.0f}) = {score.label}")
 
     return FusedDartResult(
         score=score, x_normalized=x_final, y_normalized=y_final,
-        cameras_used=used, confidence=confidence,
-        agreement=len(best_group) >= 2,
+        cameras_used=used, confidence=confidence, agreement=agreement,
     )
 
 
