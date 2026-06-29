@@ -67,6 +67,46 @@ def find_tip_normalized(location: DartLocation, homography: np.ndarray) -> tuple
     return float(tip_norm[0]), float(tip_norm[1])
 
 
+def _dart_line_normalized(location: DartLocation, homography: np.ndarray):
+    """
+    Transforme la ligne de la fléchette en espace normalisé.
+    Retourne (point, direction_unitaire) ou None.
+    La ligne passe par la pointe (sur le plan) même si les endpoints captés
+    sont sur le flight — c'est la DIRECTION qui compte pour l'intersection.
+    """
+    corners = location.corners.reshape(-1, 2).astype(np.float32)
+    if len(corners) < 2:
+        return None
+    pts = corners[:2].reshape(-1, 1, 2)
+    tr = cv2.perspectiveTransform(pts, homography).reshape(-1, 2)
+    p1, p2 = tr[0], tr[1]
+    d = p2 - p1
+    norm = np.linalg.norm(d)
+    if norm < 1e-6:
+        return None
+    return p1, d / norm
+
+
+def _intersect_lines(lines: list) -> np.ndarray | None:
+    """
+    Point minimisant la distance perpendiculaire à toutes les lignes (moindres carrés).
+    lines : liste de (point, direction_unitaire).
+    Toutes les lignes-fléchettes convergent vers la pointe physique.
+    """
+    if len(lines) < 2:
+        return None
+    A = np.zeros((2, 2))
+    b = np.zeros(2)
+    for p, d in lines:
+        M = np.eye(2) - np.outer(d, d)   # projecteur perpendiculaire à la ligne
+        A += M
+        b += M @ p
+    try:
+        return np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        return None
+
+
 def fuse_detections(
     detections: dict[int, DartLocation | None],
     homographies: dict[int, np.ndarray],
@@ -77,88 +117,56 @@ def fuse_detections(
     detections   : {camera_index: DartLocation | None}
     homographies : {camera_index: np.ndarray 3×3}
     """
-    # Transforme chaque détection valide en espace normalisé
-    normalized: dict[int, tuple[float, float]] = {}
-    confidences: dict[int, float] = {}
+    from detection.scoring.board_mapping import position_to_score
+
+    # Collecte les lignes-fléchettes en espace normalisé
+    lines = []
+    cam_indices = []
+    confs = []
 
     for cam_idx, loc in detections.items():
         if loc is None or loc.confidence < MIN_CONFIDENCE:
             continue
         if cam_idx not in homographies:
             continue
-        try:
-            result = find_tip_normalized(loc, homographies[cam_idx])
-            if result is None:
-                continue
-            x_n, y_n = result
-            if 0 <= x_n <= 800 and 0 <= y_n <= 800:
-                normalized[cam_idx] = (x_n, y_n)
-                confidences[cam_idx] = loc.confidence
-                # Debug : score par caméra
-                from detection.scoring.board_mapping import position_to_score
-                s = position_to_score(x_n, y_n)
-                logger.info(f"[CAM{cam_idx}] tip=({x_n:.0f},{y_n:.0f}) → {s.label}")
-        except Exception as e:
-            logger.warning(f"Erreur transformation caméra {cam_idx}: {e}")
+        line = _dart_line_normalized(loc, homographies[cam_idx])
+        if line is None:
+            continue
+        lines.append(line)
+        cam_indices.append(cam_idx)
+        confs.append(loc.confidence)
+        # Debug : score de la pointe "naïve" par caméra
+        tip = find_tip_normalized(loc, homographies[cam_idx])
+        if tip:
+            s = position_to_score(*tip)
+            logger.info(f"[CAM{cam_idx}] tip_naif=({tip[0]:.0f},{tip[1]:.0f}) → {s.label}")
 
-    if not normalized:
-        logger.debug("Aucune détection valide à fusionner")
+    if not lines:
         return None
 
-    if len(normalized) == 1:
-        # Une seule caméra disponible
-        cam_idx = next(iter(normalized))
-        x, y = normalized[cam_idx]
-        score = position_to_score(x, y)
-        return FusedDartResult(
-            score=score, x_normalized=x, y_normalized=y,
-            cameras_used=[cam_idx], confidence=confidences[cam_idx], agreement=False
-        )
+    # MÉTHODE PRINCIPALE : intersection des lignes-fléchettes = pointe
+    if len(lines) >= 2:
+        tip = _intersect_lines(lines)
+        if tip is not None:
+            mag = np.linalg.norm(tip - BOARD_CENTER_NORM)
+            if mag < 400:   # Intersection plausible (dans/proche du board)
+                x_final, y_final = float(tip[0]), float(tip[1])
+                score = position_to_score(x_final, y_final)
+                logger.info(f"INTERSECTION {len(lines)} lignes → ({x_final:.0f},{y_final:.0f}) = {score.label}")
+                return FusedDartResult(
+                    score=score, x_normalized=x_final, y_normalized=y_final,
+                    cameras_used=cam_indices, confidence=float(np.mean(confs)),
+                    agreement=True,
+                )
 
-    # Vérifie la cohérence entre caméras
-    positions = list(normalized.values())
-    cam_indices = list(normalized.keys())
-    confs = [confidences[i] for i in cam_indices]
-
-    agreement = _check_agreement(positions)
-
-    xs = np.array([p[0] for p in positions])
-    ys = np.array([p[1] for p in positions])
-
-    if agreement:
-        weights = np.array(confs) / np.sum(confs)
-        x_final = float(np.dot(weights, xs))
-        y_final = float(np.dot(weights, ys))
-        global_conf = float(np.mean(confs))
-    else:
-        # Désaccord : cherche une majorité 2/3 par secteur
-        from detection.scoring.board_mapping import position_to_score
-        from collections import Counter
-        labels = [position_to_score(p[0], p[1]).label for p in positions]
-        most_common, count = Counter(labels).most_common(1)[0]
-
-        if count >= 2:
-            # 2 caméras d'accord → utilise leur moyenne
-            agree_idx = [i for i, l in enumerate(labels) if l == most_common]
-            x_final = float(np.mean([positions[i][0] for i in agree_idx]))
-            y_final = float(np.mean([positions[i][1] for i in agree_idx]))
-            global_conf = float(np.mean([confs[i] for i in agree_idx]))
-            logger.info(f"Majorité 2/3 : {most_common} (cams {[cam_indices[i] for i in agree_idx]})")
-        else:
-            # Aucune majorité → médiane
-            x_final = float(np.median(xs))
-            y_final = float(np.median(ys))
-            global_conf = float(np.mean(confs)) * 0.6
-            logger.warning(f"Désaccord total — médiane ({x_final:.0f},{y_final:.0f})")
-
-    score = position_to_score(x_final, y_final)
+    # FALLBACK : une seule caméra → pointe naïve
+    tip = find_tip_normalized(detections[cam_indices[0]], homographies[cam_indices[0]])
+    if tip is None:
+        return None
+    score = position_to_score(*tip)
     return FusedDartResult(
-        score=score,
-        x_normalized=x_final,
-        y_normalized=y_final,
-        cameras_used=cam_indices,
-        confidence=global_conf,
-        agreement=agreement,
+        score=score, x_normalized=tip[0], y_normalized=tip[1],
+        cameras_used=[cam_indices[0]], confidence=confs[0] * 0.6, agreement=False,
     )
 
 
