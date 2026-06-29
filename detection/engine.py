@@ -147,13 +147,18 @@ class DetectionEngine:
             if r.state == MotionState.TAKEOUT
         ]
 
-        # Log état mouvement toutes les 3 secondes pour debug
+        if stable_cameras:
+            print(f"[ENGINE] DART_STABLE détecté sur cams {stable_cameras}", flush=True)
+        if takeout_cameras:
+            print(f"[ENGINE] TAKEOUT détecté sur cams {takeout_cameras}", flush=True)
+
+        # Log état toutes les ~5 secondes pour debug
         if not hasattr(self, '_debug_tick'):
             self._debug_tick = 0
         self._debug_tick += 1
-        if self._debug_tick % 90 == 0:
+        if self._debug_tick % 100 == 0:
             for idx, (r, _) in motion_results.items():
-                logger.info(f"[DEBUG] Cam{idx} état={r.state.value} pixels={r.nonzero_pixels}")
+                print(f"[ENGINE] Cam{idx} état={r.state.value} consec={r.nonzero_consec} ref={r.nonzero_ref}", flush=True)
 
         if takeout_cameras:
             await self._handle_takeout()
