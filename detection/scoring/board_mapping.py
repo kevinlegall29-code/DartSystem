@@ -49,9 +49,10 @@ def position_to_score(x: float, y: float) -> DartScore:
 
     magnitude = math.sqrt(vx * vx + vy * vy)
 
-    # Calcul de l'angle, normalisé avec référence à 12h = secteur 20
+    # Calcul de l'angle. atan2 augmente en anti-horaire, mais SECTORS est listé
+    # en horaire → on inverse le sens pour éviter l'effet miroir (17↔19).
     angle_raw = math.degrees(math.atan2(vy, vx))
-    angle = math.fmod((angle_raw + 360.0 - REFERENCE_ANGLE_DEG), 360.0)
+    angle = math.fmod((REFERENCE_ANGLE_DEG - angle_raw + 360.0), 360.0)
 
     # Détermination de l'anneau
     ring = _get_ring(magnitude)
