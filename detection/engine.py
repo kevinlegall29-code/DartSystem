@@ -403,6 +403,13 @@ class DetectionEngine:
             },
         )
 
+        # Met à jour le jeu (501...) et broadcast l'état
+        from api.game_logic import game
+        if game.active:
+            st = game.register_dart(result.score.label, result.score.score,
+                                    result.score.multiplier)
+            await self.event_bus.send_game_state(st)
+
         # Met à jour les références avec la fléchette plantée
         for idx in self._homographies:
             frame = frames.get(idx)
@@ -420,6 +427,10 @@ class DetectionEngine:
             score_label="MISS", score_value=0,
             camera_info={"bounceout": True, "confidence": 1.0},
         )
+        from api.game_logic import game
+        if game.active:
+            st = game.register_dart("MISS", 0, 0)
+            await self.event_bus.send_game_state(st)
 
     async def _handle_takeout(self):
         """Candidat retrait : on CONFIRME seulement si le board est vraiment vide."""
@@ -462,6 +473,12 @@ class DetectionEngine:
         logger.info(f"Retrait CONFIRMÉ après {self._darts_this_turn} fléchette(s)")
         self._darts_this_turn = 0
         await self.event_bus.send_takeout()
+
+        # Fin de tour côté jeu → joueur suivant
+        from api.game_logic import game
+        if game.active:
+            st = game.end_turn()
+            await self.event_bus.send_game_state(st)
 
         # Recapture les références du board vide
         for idx, frame in frames.items():

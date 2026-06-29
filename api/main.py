@@ -70,7 +70,7 @@ _DASHBOARD = _Path(__file__).parent.parent / "dashboard"
 @app.get("/")
 async def root():
     from fastapi.responses import FileResponse
-    return FileResponse(str(_DASHBOARD / "mobile.html"))
+    return FileResponse(str(_DASHBOARD / "game.html"))
 
 
 app.mount("/ui", StaticFiles(directory=str(_DASHBOARD), html=True), name="ui")

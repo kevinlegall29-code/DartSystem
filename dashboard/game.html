@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DartSystem — 501</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; min-height: 100%; }
+
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+    header h1 { font-size: 1rem; flex: 1; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: #f85149; }
+    .dot.ok { background: #3fb950; box-shadow: 0 0 8px #3fb950; }
+
+    .wrap { padding: 16px; max-width: 600px; margin: 0 auto; }
+
+    /* Setup */
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+    .card h2 { font-size: .85rem; color: #8b949e; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+    .modes { display: flex; gap: 8px; margin-bottom: 14px; }
+    .mode-btn { flex: 1; padding: 14px; border-radius: 10px; border: 2px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 1.1rem; font-weight: 700; cursor: pointer; }
+    .mode-btn.sel { border-color: #58a6ff; background: #0d1f38; color: #58a6ff; }
+    .player-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .player-row input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; padding: 12px; font-size: 1rem; }
+    .player-row button { background: #b62324; color: #fff; border: none; border-radius: 8px; padding: 0 14px; font-size: 1.2rem; cursor: pointer; }
+    .opt { display: flex; align-items: center; gap: 8px; margin: 12px 0; font-size: .9rem; color: #8b949e; }
+    .btn { width: 100%; padding: 16px; border-radius: 12px; border: none; font-size: 1.05rem; font-weight: 700; cursor: pointer; }
+    .btn.primary { background: #238636; color: #fff; }
+    .btn.secondary { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+    .btn.small { width: auto; padding: 10px 16px; font-size: .9rem; }
+
+    /* Game */
+    .players { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+    .pl { display: flex; align-items: center; background: #161b22; border: 2px solid #21262d; border-radius: 12px; padding: 14px 16px; transition: all .25s; }
+    .pl.active { border-color: #f0883e; background: #2a1a0e; }
+    .pl .name { flex: 1; font-size: 1.05rem; font-weight: 600; }
+    .pl .sc { font-size: 2rem; font-weight: 800; color: #58a6ff; }
+    .pl.active .sc { color: #f0883e; }
+    .pl .avg { font-size: .7rem; color: #8b949e; margin-left: 8px; }
+
+    .message { text-align: center; font-size: 1.1rem; font-weight: 600; padding: 12px; min-height: 1.4em; }
+    .message.bust { color: #f85149; }
+    .message.win { color: #3fb950; }
+
+    .turn { display: flex; gap: 10px; justify-content: center; margin-bottom: 8px; }
+    .slot { flex: 1; max-width: 100px; aspect-ratio: 3/4; background: #161b22; border: 2px solid #21262d; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
+    .slot.hit { border-color: #388bfd; background: #0d1f38; }
+    .slot.bust { border-color: #f85149; }
+    .slot .lbl { font-size: 1.5rem; font-weight: 800; color: #58a6ff; }
+    .slot .pts { font-size: .7rem; color: #8b949e; }
+    .slot .empty { color: #21262d; font-size: 1.4rem; }
+    .turntotal { text-align: center; font-size: 1.6rem; font-weight: 800; color: #f0883e; margin: 4px 0 14px; }
+
+    .controls { display: flex; gap: 10px; }
+
+    /* Correction modal */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+    .modal.show { display: flex; }
+    .modal-box { background: #161b22; border: 1px solid #30363d; border-radius: 14px; padding: 16px; width: 100%; max-width: 420px; max-height: 85vh; overflow-y: auto; }
+    .modal-box h3 { margin-bottom: 12px; font-size: 1rem; }
+    .mult-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    .mult-row button { flex: 1; padding: 10px; border-radius: 8px; border: 2px solid #30363d; background: #0d1117; color: #e6edf3; font-weight: 700; cursor: pointer; }
+    .mult-row button.sel { border-color: #58a6ff; color: #58a6ff; }
+    .num-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .num-grid button { padding: 12px 0; border-radius: 8px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; font-size: .95rem; cursor: pointer; }
+    .winner { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 60; }
+    .winner.show { display: flex; }
+    .winner .trophy { font-size: 5rem; }
+    .winner .wname { font-size: 2rem; font-weight: 800; color: #3fb950; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🎯</span>
+  <h1>DartSystem — 501</h1>
+  <span class="dot" id="dot"></span>
+</header>
+
+<div class="wrap">
+
+  <!-- SETUP -->
+  <div id="setup">
+    <div class="card">
+      <h2>Mode</h2>
+      <div class="modes">
+        <button class="mode-btn sel" data-mode="501">501</button>
+        <button class="mode-btn" data-mode="301">301</button>
+        <button class="mode-btn" data-mode="701">701</button>
+      </div>
+      <h2>Joueurs</h2>
+      <div id="players-setup">
+        <div class="player-row"><input type="text" placeholder="Joueur 1" value="Joueur 1"></div>
+        <div class="player-row"><input type="text" placeholder="Joueur 2" value="Joueur 2"></div>
+      </div>
+      <button class="btn secondary small" onclick="addPlayer()">+ Ajouter un joueur</button>
+      <label class="opt"><input type="checkbox" id="double-out" checked> Finir sur un double (double-out)</label>
+      <button class="btn primary" onclick="startGame()" style="margin-top:8px">▶ Démarrer la partie</button>
+    </div>
+  </div>
+
+  <!-- GAME -->
+  <div id="game" style="display:none">
+    <div class="players" id="players"></div>
+    <div class="message" id="message"></div>
+    <div class="turn" id="turn">
+      <div class="slot" onclick="openCorrect(0)"><span class="empty">○</span></div>
+      <div class="slot" onclick="openCorrect(1)"><span class="empty">○</span></div>
+      <div class="slot" onclick="openCorrect(2)"><span class="empty">○</span></div>
+    </div>
+    <div class="turntotal" id="turntotal"></div>
+    <div class="controls">
+      <button class="btn secondary" onclick="nextPlayer()">Joueur suivant →</button>
+      <button class="btn secondary" onclick="stopGame()">Quitter</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Correction modal -->
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3>Corriger la fléchette <span id="corr-idx"></span></h3>
+    <div class="mult-row">
+      <button data-m="S" class="sel">Simple</button>
+      <button data-m="D">Double</button>
+      <button data-m="T">Triple</button>
+    </div>
+    <div class="num-grid" id="num-grid"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn secondary small" onclick="correctWith('MISS')">MISS</button>
+      <button class="btn secondary small" onclick="correctWith('BULL')">Bull 25</button>
+      <button class="btn secondary small" onclick="correctWith('DBULL')">Bull 50</button>
+      <button class="btn secondary small" onclick="closeModal()">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- Winner -->
+<div class="winner" id="winner">
+  <div class="trophy">🏆</div>
+  <div class="wname" id="wname"></div>
+  <button class="btn primary small" onclick="stopGame()">Nouvelle partie</button>
+</div>
+
+<script>
+const host = window.location.host;
+const base = `http://${host}`;
+let ws = null;
+let selMode = '501';
+let selMult = 'S';
+let corrIndex = 0;
+
+// ---- WebSocket ----
+function connect() {
+  ws = new WebSocket(`ws://${host}/game/ws`);
+  ws.onopen = () => document.getElementById('dot').classList.add('ok');
+  ws.onclose = () => { document.getElementById('dot').classList.remove('ok'); setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'game_state') render(msg.data);
+  };
+}
+
+// ---- Setup ----
+document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('sel'));
+  b.classList.add('sel'); selMode = b.dataset.mode;
+});
+function addPlayer() {
+  const n = document.querySelectorAll('#players-setup input').length + 1;
+  const div = document.createElement('div');
+  div.className = 'player-row';
+  div.innerHTML = `<input type="text" value="Joueur ${n}"><button onclick="this.parentElement.remove()">×</button>`;
+  document.getElementById('players-setup').appendChild(div);
+}
+function startGame() {
+  const players = [...document.querySelectorAll('#players-setup input')].map(i => i.value.trim()).filter(Boolean);
+  if (players.length < 1) return;
+  fetch(`${base}/game/start`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ mode: selMode, players, double_out: document.getElementById('double-out').checked })
+  });
+}
+function stopGame() {
+  fetch(`${base}/game/stop`, { method: 'POST' });
+  document.getElementById('winner').classList.remove('show');
+}
+function nextPlayer() { fetch(`${base}/game/next`, { method: 'POST' }); }
+
+// ---- Render ----
+function render(s) {
+  if (!s.active && !s.winner) {
+    document.getElementById('setup').style.display = '';
+    document.getElementById('game').style.display = 'none';
+    document.getElementById('winner').classList.remove('show');
+    return;
+  }
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('game').style.display = '';
+
+  // Players
+  const pc = document.getElementById('players');
+  pc.innerHTML = s.players.map((p, i) => `
+    <div class="pl ${i===s.current && s.active ? 'active':''}">
+      <span class="name">${p.name}</span>
+      <span class="sc">${p.score}</span>
+      <span class="avg">${p.darts}🎯</span>
+    </div>`).join('');
+
+  // Turn darts
+  let total = 0;
+  for (let i=0;i<3;i++){
+    const el = document.getElementById('turn').children[i];
+    const d = s.turn_darts[i];
+    if (d) {
+      el.className = 'slot hit' + (d.bust?' bust':'');
+      el.innerHTML = `<div class="lbl">${d.label}</div><div class="pts">${d.value}</div>`;
+      if (!d.bust) total += d.value;
+    } else {
+      el.className = 'slot';
+      el.innerHTML = '<span class="empty">○</span>';
+    }
+  }
+  document.getElementById('turntotal').textContent = total ? `Volée : ${total}` : '';
+
+  // Message
+  const m = document.getElementById('message');
+  m.textContent = s.message;
+  m.className = 'message' + (s.message.includes('BUST')?' bust':'') + (s.winner?' win':'');
+
+  // Winner
+  if (s.winner) {
+    document.getElementById('wname').textContent = s.winner;
+    document.getElementById('winner').classList.add('show');
+  }
+}
+
+// ---- Correction ----
+function openCorrect(i) { corrIndex = i; document.getElementById('corr-idx').textContent = '#'+(i+1); document.getElementById('modal').classList.add('show'); }
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+document.querySelectorAll('.mult-row button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.mult-row button').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel'); selMult = b.dataset.m;
+});
+const ng = document.getElementById('num-grid');
+for (let n=1;n<=20;n++){ const b=document.createElement('button'); b.textContent=n; b.onclick=()=>correctWith(selMult+n); ng.appendChild(b); }
+function correctWith(label) {
+  fetch(`${base}/game/correct`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ index: corrIndex, label })
+  });
+  closeModal();
+}
+
+connect();
+</script>
+</body>
+</html>
