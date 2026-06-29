@@ -258,18 +258,10 @@ class DetectionEngine:
                     self._empty_reference[idx] = self._gray(pf)
             return
 
-        # Rafraîchit en continu les références tant qu'AUCUNE fléchette n'est sur
-        # le board (idle). Auto-cicatrisation : si une référence est devenue
-        # périmée (board bougé, fléchette restée), elle se remet à jour à vide.
-        if (self._darts_this_turn == 0 and not stable_cameras
-                and not takeout_cameras and not motion_cameras
-                and (time.time() - self._takeout_time) > self._takeout_cooldown):
-            for idx, (r, pf) in motion_results.items():
-                if r.state == MotionState.IDLE:
-                    g = self._gray(pf)
-                    self._empty_reference[idx] = g
-                    # Met à jour SEULEMENT la référence de travail (pas le suivi mouvement)
-                    self._motion[idx]._reference = g
+        # NOTE : pas d'auto-rafraîchissement de la référence ici. Ça absorbait la
+        # fléchette dans la référence pendant sa stabilisation (état "idle") →
+        # non-détection. La référence est mise à jour après chaque fléchette et
+        # après un retrait, c'est suffisant (comme au test 93%).
 
         # TAKEOUT seulement si AU MOINS 2 caméras le voient (évite faux positifs)
         if len(takeout_cameras) >= 2:
