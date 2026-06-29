@@ -44,7 +44,7 @@ class MotionDetector:
         # Seuils sur frames consécutives (mouvement)
         min_motion_px:  int = 150,    # Minimum pour considérer qu'il y a du mouvement
         max_motion_px:  int = 40000,  # Au-delà = retrait des fléchettes
-        stable_frames:  int = 3,      # Frames consécutives calmes pour confirmer
+        stable_frames:  int = 5,      # Frames consécutives calmes pour confirmer
         motion_thresh:  int = 15,     # Seuil binaire sur diff consécutive
         # Seuil sur diff avec référence (dart visible)
         ref_thresh:     int = 25,     # Seuil binaire sur diff avec board vide

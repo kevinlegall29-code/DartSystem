@@ -33,13 +33,17 @@ SYNC_WINDOW = 0.3
 MAX_DARTS_PER_TURN = 3
 
 # Nombre de passes de détection moyennées (médiane) pour réduire le jitter
-N_SAMPLES = 3
+N_SAMPLES = 4
 
 # Sauvegarde des images de debug (lourd : 6 warps + écriture disque par fléchette).
 # Désactivé par défaut pour la fluidité — activer seulement pour le réglage.
 DEBUG_VIZ = False
-SAMPLE_DELAY = 0.03   # secondes entre passes de moyennage
-POST_DART_COOLDOWN = 0.35   # garde-temps après une fléchette (évite re-détection)
+SAMPLE_DELAY = 0.04   # secondes entre passes de moyennage
+POST_DART_COOLDOWN = 0.5   # garde-temps après une fléchette (évite re-détection)
+
+# Isolation par masque de mouvement (expérimental) — désactivé : causait des
+# non-détections. La détection se fait sur tout le diff (comme au test 93%).
+MOTION_ISOLATION = False
 
 
 def _touches_border(mask: np.ndarray, margin: int = 10, min_px: int = 60) -> bool:
@@ -309,7 +313,7 @@ class DetectionEngine:
 
             # ISOLATION : restreint à la zone de mouvement (la nouvelle fléchette).
             # Ignore les fléchettes statiques déjà plantées (pas de mouvement récent).
-            accum = self._motion_accum.get(idx)
+            accum = self._motion_accum.get(idx) if MOTION_ISOLATION else None
             if accum is not None and cv2.countNonZero(accum) > 30:
                 # Dilate largement la zone de mouvement (le vol + la position finale)
                 zone = cv2.dilate(accum, np.ones((45, 45), np.uint8), iterations=1)
