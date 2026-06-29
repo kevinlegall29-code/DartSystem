@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "calibrations"
 
-# L'ordre des caméras n'impacte pas la détection (tip = point le plus proche du centre)
+# Caméras utilisées pour la localisation de la pointe (pas la caméra du dessus = slot 1)
+TIP_CAMERAS = {0, 2}   # CAM0 (bas-gauche) et CAM2 (bas-droite) seulement
 
 # Délai max entre détection d'une caméra et les autres (secondes)
 SYNC_WINDOW = 0.3
@@ -178,6 +179,11 @@ class DetectionEngine:
         detections = {}
 
         for idx in self._homographies:
+            # CAM1 (dessus) : mouvement uniquement, pas de localisation de pointe
+            if idx not in TIP_CAMERAS:
+                detections[idx] = None
+                continue
+
             frame = frames.get(idx)
             if frame is None:
                 continue
