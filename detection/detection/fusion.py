@@ -86,6 +86,10 @@ def fuse_detections(
             if 0 <= x_n <= 800 and 0 <= y_n <= 800:
                 normalized[cam_idx] = (x_n, y_n)
                 confidences[cam_idx] = loc.confidence
+                # Debug : score par caméra
+                from detection.scoring.board_mapping import position_to_score
+                s = position_to_score(x_n, y_n)
+                logger.info(f"[CAM{cam_idx}] tip=({x_n:.0f},{y_n:.0f}) → {s.label}")
         except Exception as e:
             logger.warning(f"Erreur transformation caméra {cam_idx}: {e}")
 
@@ -110,21 +114,21 @@ def fuse_detections(
 
     agreement = _check_agreement(positions)
 
+    xs = np.array([p[0] for p in positions])
+    ys = np.array([p[1] for p in positions])
+
     if agreement:
-        # Moyenne pondérée par la confiance
-        weights = np.array(confs)
-        weights /= weights.sum()
-        xs = np.array([p[0] for p in positions])
-        ys = np.array([p[1] for p in positions])
+        # Accord : moyenne pondérée par la confiance
+        weights = np.array(confs) / np.sum(confs)
         x_final = float(np.dot(weights, xs))
         y_final = float(np.dot(weights, ys))
         global_conf = float(np.mean(confs))
     else:
-        # Désaccord : prend la caméra avec la meilleure confiance
-        best_idx = int(np.argmax(confs))
-        x_final, y_final = positions[best_idx]
-        global_conf = confs[best_idx] * 0.7  # Pénalité de confiance
-        logger.warning(f"Désaccord caméras {cam_indices} — utilise cam {cam_indices[best_idx]}")
+        # Désaccord : médiane (plus robuste aux caméras mal calibrées)
+        x_final = float(np.median(xs))
+        y_final = float(np.median(ys))
+        global_conf = float(np.mean(confs)) * 0.7
+        logger.warning(f"Désaccord caméras {cam_indices} — médiane ({x_final:.0f},{y_final:.0f})")
 
     score = position_to_score(x_final, y_final)
     return FusedDartResult(
