@@ -18,7 +18,8 @@ router = APIRouter()
 _config = cfg.load()
 _exposure = _config.get("exposure", 1200)
 
-camera_manager = CameraManager(device_indices=(0, 2, 4))
+# rotate180 : mettre True pour les caméras montées à l'envers
+camera_manager = CameraManager(device_indices=(0, 2, 4), rotate180=(False, True, False))
 camera_manager.start_all()
 
 # Applique l'exposition sauvegardée au démarrage

@@ -9,8 +9,9 @@ logger = logging.getLogger(__name__)
 class CameraStream:
     """Capture asynchrone d'une caméra USB (OV9732)."""
 
-    def __init__(self, index: int, width: int = 1280, height: int = 720, fps: int = 30, exposure: int = 156):
+    def __init__(self, index: int, width: int = 1280, height: int = 720, fps: int = 30, exposure: int = 156, rotate180: bool = False):
         self.index = index
+        self.rotate180 = rotate180
         self.width = width
         self.height = height
         self.fps = fps
@@ -55,9 +56,14 @@ class CameraStream:
                     self._frame = frame
 
     def read(self):
-        """Retourne la dernière frame disponible."""
+        """Retourne la dernière frame disponible (retournée si rotate180=True)."""
         with self._lock:
-            return self._frame.copy() if self._frame is not None else None
+            if self._frame is None:
+                return None
+            frame = self._frame.copy()
+            if self.rotate180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            return frame
 
     def stop(self):
         self._stopped = True
@@ -83,10 +89,10 @@ class CameraManager:
     Les clés du dict sont toujours 0, 1, 2 pour le dashboard et l'API.
     """
 
-    def __init__(self, device_indices: tuple = (0, 2, 4)):
+    def __init__(self, device_indices: tuple = (0, 2, 4), rotate180: tuple = (False, False, False)):
         self.cameras: dict[int, CameraStream] = {
-            slot: CameraStream(index=dev_idx)
-            for slot, dev_idx in enumerate(device_indices)
+            slot: CameraStream(index=dev_idx, rotate180=rot)
+            for slot, (dev_idx, rot) in enumerate(zip(device_indices, rotate180))
         }
 
     def start_all(self):
