@@ -138,45 +138,55 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    if not lines:
+    # MÉTHODE PAR CONSENSUS :
+    # Chaque caméra fournit 2 extrémités. La vraie pointe est sur le plan du board
+    # → elle se projette au MÊME endroit depuis toutes les caméras (elles se regroupent).
+    # Le flight (hors plan) se projette à des endroits dispersés.
+    # On cherche donc le point où des extrémités de caméras DIFFÉRENTES convergent.
+
+    CLUSTER_TOL = 60   # px : tolérance de regroupement en espace normalisé
+
+    candidates = []   # (point_norm, cam_idx)
+    for cam_idx, loc in detections.items():
+        if loc is None or loc.confidence < MIN_CONFIDENCE or cam_idx not in homographies:
+            continue
+        corners = loc.corners.reshape(-1, 2).astype(np.float32)
+        if len(corners) < 2:
+            continue
+        pts = corners[:2].reshape(-1, 1, 2)
+        tr = cv2.perspectiveTransform(pts, homographies[cam_idx]).reshape(-1, 2)
+        for p in tr:
+            candidates.append((p, cam_idx))
+
+    if not candidates:
         return None
 
-    # Garde uniquement les lignes assez longues (vues de profil = direction fiable).
-    # Une ligne courte = fléchette vue de bout → direction non fiable.
-    MIN_LINE_LENGTH = 150
-    good = [(l, c, i) for l, c, i in zip(lines, confs, cam_indices) if l[2] >= MIN_LINE_LENGTH]
+    # Pour chaque candidat, mesure le support : extrémités d'AUTRES caméras proches
+    best = None
+    best_support = -1
+    for p, cam in candidates:
+        cluster = [p]
+        cams_in = {cam}
+        for q, cam2 in candidates:
+            if cam2 == cam or cam2 in cams_in:
+                continue
+            if np.linalg.norm(p - q) < CLUSTER_TOL:
+                cluster.append(q)
+                cams_in.add(cam2)
+        support = len(cams_in)
+        if support > best_support:
+            best_support = support
+            best = np.mean(cluster, axis=0)
 
-    # MÉTHODE PRINCIPALE : intersection pondérée des bonnes lignes
-    if len(good) >= 2:
-        # Pondération par longueur² pour favoriser fortement les vues de profil
-        weighted = [(p, d, length ** 2) for (p, d, length), _, _ in good]
-        tip = _intersect_lines(weighted)
-        used = [i for _, _, i in good]
-        if tip is not None:
-            mag = np.linalg.norm(tip - BOARD_CENTER_NORM)
-            if mag < 400:
-                x_final, y_final = float(tip[0]), float(tip[1])
-                score = position_to_score(x_final, y_final)
-                logger.info(f"INTERSECTION {len(good)} bonnes lignes (cams {used}) → "
-                            f"({x_final:.0f},{y_final:.0f}) = {score.label}")
-                return FusedDartResult(
-                    score=score, x_normalized=x_final, y_normalized=y_final,
-                    cameras_used=used, confidence=float(np.mean([c for _, c, _ in good])),
-                    agreement=True,
-                )
+    x_final, y_final = float(best[0]), float(best[1])
+    score = position_to_score(x_final, y_final)
+    logger.info(f"CONSENSUS {best_support} caméra(s) → ({x_final:.0f},{y_final:.0f}) = {score.label}")
 
-    # FALLBACK : pas assez de bonnes lignes → meilleure caméra (ligne la plus longue) seule
-    best_i = int(np.argmax([l[2] for l in lines]))
-    best_cam = cam_indices[best_i]
-    tip = find_tip_normalized(detections[best_cam], homographies[best_cam])
-    if tip is None:
-        return None
-    score = position_to_score(*tip)
-    logger.info(f"FALLBACK cam{best_cam} (ligne {lines[best_i][2]:.0f}px) → "
-                f"({tip[0]:.0f},{tip[1]:.0f}) = {score.label}")
     return FusedDartResult(
-        score=score, x_normalized=tip[0], y_normalized=tip[1],
-        cameras_used=[best_cam], confidence=confs[best_i] * 0.6, agreement=False,
+        score=score, x_normalized=x_final, y_normalized=y_final,
+        cameras_used=cam_indices,
+        confidence=min(1.0, best_support / 3.0),
+        agreement=best_support >= 2,
     )
 
 
