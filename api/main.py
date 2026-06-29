@@ -67,13 +67,25 @@ from pathlib import Path as _Path  # noqa: E402
 _DASHBOARD = _Path(__file__).parent.parent / "dashboard"
 
 
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/")
 async def root():
     from fastapi.responses import FileResponse
-    return FileResponse(str(_DASHBOARD / "game.html"))
+    return FileResponse(str(_DASHBOARD / "game.html"), headers=_NO_CACHE)
 
 
-app.mount("/ui", StaticFiles(directory=str(_DASHBOARD), html=True), name="ui")
+@app.get("/ui/{page}")
+async def ui_page(page: str):
+    """Sert les pages HTML du dashboard sans cache (toujours la dernière version)."""
+    from fastapi.responses import FileResponse, Response
+    if ".." in page:
+        return Response(status_code=404)
+    path = _DASHBOARD / page
+    if not path.exists():
+        return Response(status_code=404)
+    return FileResponse(str(path), headers=_NO_CACHE)
 
 
 @app.post("/calibration/reload")
