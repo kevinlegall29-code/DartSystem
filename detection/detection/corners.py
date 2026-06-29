@@ -37,58 +37,41 @@ def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartL
     Détecte la fléchette dans l'image de différence.
     Retourne les deux extrémités de la fléchette (pointe et fût).
     """
-    # Améliore le contraste de la diff
+    # Nettoie le masque : ferme les trous, garde la plus grande composante
     kernel = np.ones((3, 3), np.uint8)
-    dilated = cv2.dilate(diff_frame, kernel, iterations=2)
-    closed  = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel)
+    closed = cv2.morphologyEx(diff_frame, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         return None
 
-    # Garde les contours de taille plausible pour une fléchette
-    valid = [
-        c for c in contours
-        if MIN_DART_AREA < cv2.contourArea(c) < MAX_DART_AREA
-    ]
+    valid = [c for c in contours if MIN_DART_AREA < cv2.contourArea(c) < MAX_DART_AREA]
     if not valid:
         return None
 
-    # Fusionne tous les contours valides (la fléchette peut apparaître en plusieurs morceaux)
-    all_pts = np.vstack(valid)
+    # Garde le plus gros contour (la fléchette = plus gros changement cohérent)
+    main = max(valid, key=cv2.contourArea)
+    pts_contour = main.reshape(-1, 2).astype(np.float32)
 
-    # Rectangle orienté minimum autour de la fléchette
-    rect = cv2.minAreaRect(all_pts)
-    box  = cv2.boxPoints(rect)   # 4 coins du rectangle
+    # fitLine robuste (Huber) → direction stable de l'axe de la fléchette
+    line = cv2.fitLine(pts_contour, cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
+    vx, vy, x0, y0 = float(line[0]), float(line[1]), float(line[2]), float(line[3])
 
-    (cx, cy), (w, h), angle = rect
-    long_side  = max(w, h)
-    short_side = min(w, h)
+    # Projette tous les points du contour sur la ligne → extrémités
+    direction = np.array([vx, vy])
+    origin = np.array([x0, y0])
+    ts = (pts_contour - origin) @ direction
+    t_min, t_max = float(ts.min()), float(ts.max())
 
-    if short_side < 1 or long_side / short_side < MIN_ASPECT_RATIO:
-        # Pas assez allongé → probablement pas une fléchette
-        # On utilise quand même le centroïde comme fallback
-        M = cv2.moments(all_pts)
-        if M["m00"] == 0:
-            return None
-        cx_pt = M["m10"] / M["m00"]
-        cy_pt = M["m01"] / M["m00"]
-        pts = np.array([[cx_pt, cy_pt], [cx_pt, cy_pt]], dtype=float)
-        return DartLocation(corners=pts, confidence=0.3, corners_count=len(all_pts))
+    end1 = origin + t_min * direction
+    end2 = origin + t_max * direction
 
-    # Les deux extrémités du grand axe du rectangle orienté
-    # box[0], box[1], box[2], box[3] = coins dans le sens horaire
-    # Les extrémités du grand axe sont les paires de coins adjacents les plus éloignés
-    if w >= h:
-        # Le grand axe est horizontal dans le rectangle
-        end1 = ((box[0] + box[3]) / 2)
-        end2 = ((box[1] + box[2]) / 2)
-    else:
-        end1 = ((box[0] + box[1]) / 2)
-        end2 = ((box[2] + box[3]) / 2)
+    length = t_max - t_min
+    if length < 10:   # Trop court pour une direction fiable
+        return None
 
     pts = np.array([end1, end2], dtype=float)
-    area = cv2.contourArea(all_pts)
-    confidence = min(1.0, area / 5000.0)
+    area = cv2.contourArea(main)
+    confidence = min(1.0, area / 3000.0)
 
     return DartLocation(corners=pts, confidence=confidence, corners_count=int(area))

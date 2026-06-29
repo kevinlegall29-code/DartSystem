@@ -37,11 +37,19 @@ def save_camera_detection(
     if endpoints is not None and len(endpoints) >= 2:
         for pt in endpoints:
             cv2.circle(img, (int(pt[0]), int(pt[1])), 8, (0, 165, 255), 2)
-        # Trace la ligne de la fléchette
-        cv2.line(img,
-                 (int(endpoints[0][0]), int(endpoints[0][1])),
-                 (int(endpoints[1][0]), int(endpoints[1][1])),
-                 (255, 255, 0), 2)
+        # Trace la ligne de la fléchette PROLONGÉE (montre la direction d'intersection)
+        p1 = np.array(endpoints[0], dtype=float)
+        p2 = np.array(endpoints[1], dtype=float)
+        d = p2 - p1
+        n = np.linalg.norm(d)
+        if n > 1:
+            d = d / n
+            far1 = p1 - d * 2000
+            far2 = p2 + d * 2000
+            cv2.line(img, (int(far1[0]), int(far1[1])),
+                     (int(far2[0]), int(far2[1])), (255, 255, 0), 1)
+            cv2.line(img, (int(p1[0]), int(p1[1])),
+                     (int(p2[0]), int(p2[1])), (255, 200, 0), 3)
 
     if tip_camera_space is not None:
         cv2.circle(img, (int(tip_camera_space[0]), int(tip_camera_space[1])),
