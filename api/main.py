@@ -59,6 +59,23 @@ async def health():
     return {"status": "ok", "version": "0.1.0"}
 
 
+# Sert les pages web (dashboard, mobile, calibration) accessibles depuis le réseau.
+# Téléphone → http://<IP_RPI>:8080/  (page mobile par défaut)
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_DASHBOARD = _Path(__file__).parent.parent / "dashboard"
+
+
+@app.get("/")
+async def root():
+    from fastapi.responses import FileResponse
+    return FileResponse(str(_DASHBOARD / "mobile.html"))
+
+
+app.mount("/ui", StaticFiles(directory=str(_DASHBOARD), html=True), name="ui")
+
+
 @app.post("/calibration/reload")
 async def reload_calibrations():
     """Recharge les calibrations à chaud après recalibration depuis l'app."""
