@@ -91,20 +91,53 @@ def _intersect_lines(lines: list) -> np.ndarray | None:
     """
     Point minimisant la distance perpendiculaire pondérée aux lignes.
     lines : liste de (point, direction_unitaire, poids).
-    Le poids (longueur de ligne) fait dominer les caméras voyant la fléchette de profil.
     """
     if len(lines) < 2:
         return None
     A = np.zeros((2, 2))
     b = np.zeros(2)
     for p, d, w in lines:
-        M = (np.eye(2) - np.outer(d, d)) * w   # projecteur perpendiculaire pondéré
+        M = (np.eye(2) - np.outer(d, d)) * w
         A += M
         b += M @ p
     try:
         return np.linalg.solve(A, b)
     except np.linalg.LinAlgError:
         return None
+
+
+def _line_point_dist(line, pt) -> float:
+    """Distance perpendiculaire d'un point à une ligne (point, direction)."""
+    p, d = line[0], line[1]
+    v = np.asarray(pt) - p
+    return float(abs(v[0] * d[1] - v[1] * d[0]))   # composante perpendiculaire
+
+
+def _ransac_intersection(lines: list, tol: float = 25.0):
+    """
+    Intersection robuste : teste chaque paire de lignes, garde l'intersection
+    soutenue par le plus de lignes (rejette la caméra défaillante).
+    lines : liste de (point, direction, longueur). Retourne (point, indices_inliers).
+    """
+    n = len(lines)
+    if n < 2:
+        return None, []
+    best_pt, best_inliers = None, []
+    for i in range(n):
+        for j in range(i + 1, n):
+            pt = _intersect_lines([(lines[i][0], lines[i][1], 1.0),
+                                   (lines[j][0], lines[j][1], 1.0)])
+            if pt is None:
+                continue
+            inliers = [k for k in range(n) if _line_point_dist(lines[k], pt) < tol]
+            if len(inliers) > len(best_inliers):
+                best_inliers = inliers
+                best_pt = pt
+    if best_pt is None:
+        return None, []
+    # Raffine avec toutes les lignes inliers (pondérées par longueur²)
+    refined = _intersect_lines([(lines[k][0], lines[k][1], lines[k][2] ** 2) for k in best_inliers])
+    return (refined if refined is not None else best_pt), best_inliers
 
 
 def fuse_detections(
@@ -192,17 +225,16 @@ def fuse_detections(
         final, used = best_group
         confidence, agreement, method = 0.9, True, "consensus"
     else:
-        # MÉTHODE 2 : croisé des lignes — UNIQUEMENT les caméras qui ont au moins
-        # un bout dans le board (sinon leur ligne est du bruit et fausse le croisé).
+        # MÉTHODE 2 : croisé des lignes RANSAC — rejette la caméra défaillante.
+        # On ne garde que les caméras ayant un bout dans le board.
         tip = None
         valid_lines = [
             ln for ln, c in zip(lines, cam_indices)
             if any(on_board(p) for p in cand[c])
         ]
         if len(valid_lines) >= 2:
-            weighted = [(p, d, length ** 2) for (p, d, length) in valid_lines]
-            inter = _intersect_lines(weighted)
-            if inter is not None and on_board(inter):
+            inter, inliers = _ransac_intersection(valid_lines)
+            if inter is not None and on_board(inter) and len(inliers) >= 2:
                 tip = inter
         if tip is not None:
             final = np.asarray(tip)

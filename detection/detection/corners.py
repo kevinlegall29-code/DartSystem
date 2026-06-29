@@ -100,15 +100,27 @@ def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartL
     end_a = best_p + t_min * best_dir
     end_b = best_p + t_max * best_dir
 
-    # Épaisseur à chaque bout : std de la distance perpendiculaire sur 30% du bout
     span = t_max - t_min
-    near_a = seg_ds[seg_ts < t_min + 0.3 * span]
-    near_b = seg_ds[seg_ts > t_max - 0.3 * span]
-    width_a = float(np.std(near_a)) if len(near_a) > 2 else 0.0
-    width_b = float(np.std(near_b)) if len(near_b) > 2 else 0.0
 
-    # La pointe = le bout le plus FIN (épaisseur la plus faible)
-    if width_a <= width_b:
+    # --- Discrimination pointe / flight par DEUX indices combinés ---
+    # 1. Densité de pixels : le flight (large) a plus de pixels à son bout que la pointe (fine)
+    near_a_mask = seg_ts < t_min + 0.3 * span
+    near_b_mask = seg_ts > t_max - 0.3 * span
+    density_a = int(near_a_mask.sum())
+    density_b = int(near_b_mask.sum())
+
+    # 2. Distance au centroïde : le flight a + de masse → centroïde tiré vers lui
+    #    → la pointe est le bout le plus ÉLOIGNÉ du centroïde
+    centroid = seg_pts.mean(axis=0)
+    dist_a = float(np.linalg.norm(end_a - centroid))
+    dist_b = float(np.linalg.norm(end_b - centroid))
+
+    # Vote : chaque indice désigne la pointe (a ou b)
+    vote_a = 0
+    vote_a += 1 if density_a < density_b else -1   # pointe = moins dense
+    vote_a += 1 if dist_a > dist_b else -1         # pointe = plus loin du centroïde
+
+    if vote_a >= 0:
         tip, flight = end_a, end_b
     else:
         tip, flight = end_b, end_a
