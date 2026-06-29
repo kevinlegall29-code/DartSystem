@@ -425,26 +425,32 @@ class DetectionEngine:
         # Attend que le mouvement (bras) se calme
         await self._wait_until_stable()
 
-        # VALIDATION : le board est-il réellement redevenu vide (fléchettes parties) ?
-        # On compare à la référence "board vide". Un vrai retrait → board vide.
-        # Un faux positif (bras en lançant) → fléchettes toujours présentes.
+        # VALIDATION : les fléchettes ont-elles vraiment été RETIRÉES ?
+        # On compare à la référence de travail (qui contient les fléchettes plantées).
+        # Retrait → le board a beaucoup CHANGÉ (fléchettes parties = gros diff).
+        # Fausse alerte (bras) → fléchettes toujours là = board ~identique = petit diff.
         frames = self.cameras.read_all()
-        empty_cams = 0
+        changed_cams = 0
         total = 0
         for idx, frame in frames.items():
-            if frame is None or idx not in self._empty_reference:
+            if frame is None:
+                continue
+            ref = self._motion[idx]._reference
+            if ref is None:
                 continue
             total += 1
             gray = self._gray(self._preprocess(frame, idx))
-            diff = cv2.absdiff(self._empty_reference[idx], gray)
+            diff = cv2.absdiff(ref.astype(np.uint8), gray)
             _, th = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
-            if cv2.countNonZero(th) < 4000:   # ~vide (pas de fléchettes)
-                empty_cams += 1
+            nz = cv2.countNonZero(th)
+            print(f"[ENGINE] validation retrait cam{idx}: diff={nz}", flush=True)
+            if nz > 1500:   # le board a changé (fléchettes retirées)
+                changed_cams += 1
 
-        if empty_cams < 2:
-            # Fausse alerte : les fléchettes sont toujours là → on N'efface PAS le tour
-            print(f"[ENGINE] Faux retrait ignoré (board pas vide : {empty_cams}/{total} cams vides)", flush=True)
-            logger.info(f"Faux retrait ignoré — board pas vide ({empty_cams}/{total})")
+        if changed_cams < 2:
+            # Fléchettes toujours présentes → fausse alerte, on N'efface PAS le tour
+            print(f"[ENGINE] Faux retrait ignoré ({changed_cams}/{total} cams ont changé)", flush=True)
+            logger.info(f"Faux retrait ignoré ({changed_cams}/{total})")
             return
 
         # Retrait CONFIRMÉ
