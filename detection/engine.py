@@ -157,6 +157,15 @@ class DetectionEngine:
             for idx, (r, _) in motion_results.items():
                 print(f"[ENGINE] Cam{idx} état={r.state.value} consec={r.nonzero_consec} ref={r.nonzero_ref}", flush=True)
 
+        # Cible déplacée / lumière changée : référence déjà recapturée par le détecteur
+        board_changed = [
+            idx for idx, (r, _) in motion_results.items()
+            if r.state == MotionState.BOARD_CHANGED
+        ]
+        if board_changed:
+            print(f"[ENGINE] Cible/lumière changée sur cams {board_changed} — référence recapturée", flush=True)
+            return
+
         # TAKEOUT seulement si AU MOINS 2 caméras le voient (évite faux positifs)
         if len(takeout_cameras) >= 2:
             print(f"[ENGINE] TAKEOUT sur cams {takeout_cameras}", flush=True)

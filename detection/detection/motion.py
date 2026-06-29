@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class MotionState(Enum):
-    IDLE         = "idle"     # Pas de mouvement, board vide
-    MOTION       = "motion"   # Mouvement détecté (fléchette en vol)
-    DART_STABLE  = "stable"   # Fléchette plantée et immobile → analyser
-    TAKEOUT      = "takeout"  # Grand mouvement = retrait des fléchettes
+    IDLE          = "idle"     # Pas de mouvement, board vide
+    MOTION        = "motion"   # Mouvement détecté (fléchette en vol)
+    DART_STABLE   = "stable"   # Fléchette plantée et immobile → analyser
+    TAKEOUT       = "takeout"  # Grand mouvement = retrait des fléchettes
+    BOARD_CHANGED = "board"    # Cible déplacée / lumière changée → réf recapturée
 
 
 @dataclass
@@ -47,6 +48,7 @@ class MotionDetector:
         # Seuil sur diff avec référence (dart visible)
         ref_thresh:     int = 25,     # Seuil binaire sur diff avec board vide
         min_dart_px:    int = 100,    # Pixels min pour qu'une fléchette soit visible
+        max_ref_px:     int = 20000,  # Au-delà = cible déplacée/lumière (pas une fléchette)
     ):
         self.min_motion_px = min_motion_px
         self.max_motion_px = max_motion_px
@@ -54,6 +56,7 @@ class MotionDetector:
         self.motion_thresh = motion_thresh
         self.ref_thresh    = ref_thresh
         self.min_dart_px   = min_dart_px
+        self.max_ref_px    = max_ref_px
 
         self._reference:  np.ndarray | None = None   # Board vide (gris+blur)
         self._prev_frame: np.ndarray | None = None   # Frame T-1 (gris+blur)
@@ -104,18 +107,28 @@ class MotionDetector:
             self._stable_count = 0
             return MotionResult(MotionState.MOTION, thresh_ref, nonzero_consec, nonzero_ref)
 
+        # Diff énorme avec la référence + scène stable = la cible a bougé ou
+        # la lumière a changé (PAS une fléchette). On recapture la référence.
+        if nonzero_consec < self.min_motion_px and nonzero_ref > self.max_ref_px:
+            self._stable_count += 1
+            if self._stable_count >= self.stable_frames:
+                self._reference = gray            # accepte le nouvel état comme référence
+                self._in_motion = False
+                self._stable_count = 0
+                return MotionResult(MotionState.BOARD_CHANGED, thresh_ref, nonzero_consec, nonzero_ref)
+            return MotionResult(MotionState.IDLE, thresh_ref, nonzero_consec, nonzero_ref)
+
         # Scène calme
         if self._in_motion:
             # Était en mouvement, maintenant stable → fléchette posée ?
-            if nonzero_ref >= self.min_dart_px:
-                # Il y a bien quelque chose de nouveau vs le board vide
+            if self.min_dart_px <= nonzero_ref <= self.max_ref_px:
                 self._stable_count += 1
                 if self._stable_count >= self.stable_frames:
                     self._in_motion    = False
                     self._stable_count = 0
                     return MotionResult(MotionState.DART_STABLE, thresh_ref, nonzero_consec, nonzero_ref)
             else:
-                # Rien de visible vs référence → faux positif, reset
+                # Rien de visible OU diff trop grande → faux positif, reset
                 self._in_motion    = False
                 self._stable_count = 0
 
