@@ -138,40 +138,38 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    if not lines:
-        return None
-
-    # MÉTHODE PRINCIPALE : intersection des lignes-fléchettes.
-    # Chaque ligne (projetée sur le plan board) passe par la pointe physique,
-    # peu importe où se trouve le flight. L'intersection = la pointe.
-    if len(lines) >= 2:
-        # Pondère par longueur² (vues de profil = directions fiables)
-        weighted = [(p, d, length ** 2) for (p, d, length) in lines]
-        tip = _intersect_lines(weighted)
+    # Pointe par caméra : extrémité vers le centre du board (sur le plan).
+    tips = []
+    for cam_idx in cam_indices:
+        tip = find_tip_normalized(detections[cam_idx], homographies[cam_idx])
         if tip is not None:
-            mag = np.linalg.norm(tip - BOARD_CENTER_NORM)
-            if mag < 420:
-                x_final, y_final = float(tip[0]), float(tip[1])
-                score = position_to_score(x_final, y_final)
-                logger.info(f"INTERSECTION {len(lines)} lignes (cams {cam_indices}) → "
-                            f"({x_final:.0f},{y_final:.0f}) = {score.label}")
-                return FusedDartResult(
-                    score=score, x_normalized=x_final, y_normalized=y_final,
-                    cameras_used=cam_indices, confidence=float(np.mean(confs)),
-                    agreement=True,
-                )
+            tips.append(np.array(tip))
+            s = position_to_score(*tip)
+            logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) → {s.label}")
 
-    # FALLBACK : 1 seule ligne → pointe naïve de la meilleure caméra
-    best_i = int(np.argmax([l[2] for l in lines]))
-    best_cam = cam_indices[best_i]
-    tip = find_tip_normalized(detections[best_cam], homographies[best_cam])
-    if tip is None:
+    if not tips:
         return None
-    score = position_to_score(*tip)
-    logger.info(f"FALLBACK cam{best_cam} → ({tip[0]:.0f},{tip[1]:.0f}) = {score.label}")
+
+    tips = np.array(tips)
+
+    if len(tips) >= 2:
+        # Médiane composante par composante : robuste à une caméra aberrante
+        med = np.median(tips, axis=0)
+        # Garde les pointes proches de la médiane (< 80px), moyenne-les
+        dists = np.linalg.norm(tips - med, axis=1)
+        inliers = tips[dists < 80]
+        final = inliers.mean(axis=0) if len(inliers) >= 2 else med
+    else:
+        final = tips[0]
+
+    x_final, y_final = float(final[0]), float(final[1])
+    score = position_to_score(x_final, y_final)
+    logger.info(f"MÉDIANE {len(tips)} pointes → ({x_final:.0f},{y_final:.0f}) = {score.label}")
+
     return FusedDartResult(
-        score=score, x_normalized=tip[0], y_normalized=tip[1],
-        cameras_used=[best_cam], confidence=confs[best_i] * 0.5, agreement=False,
+        score=score, x_normalized=x_final, y_normalized=y_final,
+        cameras_used=cam_indices, confidence=float(np.mean(confs)),
+        agreement=len(tips) >= 2,
     )
 
 

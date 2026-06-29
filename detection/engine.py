@@ -200,7 +200,8 @@ class DetectionEngine:
             gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
             diff = cv2.absdiff(ref.astype(np.uint8), gray)
-            _, thresh = cv2.threshold(diff, 35, 255, cv2.THRESH_BINARY)
+            # Seuil bas pour capter aussi le fût sombre qui se fond dans le board noir
+            _, thresh = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
 
             location = detect_dart_location(thresh)
             detections[idx] = location
