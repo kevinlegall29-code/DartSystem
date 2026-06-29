@@ -39,6 +39,9 @@ class DartBle extends ChangeNotifier {
   final _eventController = StreamController<DartEvent>.broadcast();
   Stream<DartEvent> get events => _eventController.stream;
 
+  int eventCount = 0;          // debug : nb d'events BLE reçus
+  String lastRaw = "";         // debug : dernier message brut
+
   void _setStatus(BleStatus s) { status = s; notifyListeners(); }
 
   /// Scanne et se connecte au premier DartSystem trouvé.
@@ -94,9 +97,9 @@ class DartBle extends ChangeNotifier {
         if (svc.uuid.toString().toLowerCase() != kServiceUuid) continue;
         for (final c in svc.characteristics) {
           if (c.uuid.toString().toLowerCase() != kCharUuid) continue;
-          await c.setNotifyValue(true);
           _charSub?.cancel();
-          _charSub = c.lastValueStream.listen(_onData);
+          _charSub = c.onValueReceived.listen(_onData);
+          await c.setNotifyValue(true);
         }
       }
       _setStatus(BleStatus.connected);
@@ -109,12 +112,16 @@ class DartBle extends ChangeNotifier {
 
   void _onData(List<int> data) {
     if (data.isEmpty) return;
+    eventCount++;
     try {
-      final msg = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
+      lastRaw = utf8.decode(data);
+      debugPrint("BLE reçu: $lastRaw");
+      final msg = jsonDecode(lastRaw) as Map<String, dynamic>;
       _eventController.add(DartEvent.fromJson(msg));
     } catch (e) {
-      debugPrint("BLE parse error: $e");
+      debugPrint("BLE parse error: $e ($lastRaw)");
     }
+    notifyListeners();
   }
 
   Future<void> disconnect() async {

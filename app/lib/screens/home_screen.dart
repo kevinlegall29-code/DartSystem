@@ -23,6 +23,9 @@ class HomeScreen extends StatelessWidget {
           Text(clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
         ]),
         actions: [
+          Center(child: Text("BLE:${ble.eventCount}",
+              style: const TextStyle(fontSize: 12, color: Colors.white54))),
+          const SizedBox(width: 10),
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: _BleIndicator(status: ble.status),
