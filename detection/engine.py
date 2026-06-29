@@ -57,6 +57,7 @@ class DetectionEngine:
         self._last_dart_time = 0.0
         self._takeout_time = 0.0   # timestamp du dernier retrait
         self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
+        self._motion_since = 0.0   # début du dernier mouvement non résolu (bounce-out)
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -148,6 +149,30 @@ class DetectionEngine:
             idx for idx, (r, _) in motion_results.items()
             if r.state == MotionState.TAKEOUT
         ]
+        motion_cameras = [
+            idx for idx, (r, _) in motion_results.items()
+            if r.state == MotionState.MOTION
+        ]
+
+        # --- Suivi bounce-out : une fléchette qui apparaît puis disparaît ---
+        now = time.time()
+        if motion_cameras:
+            if self._motion_since == 0.0:
+                self._motion_since = now
+        else:
+            # Plus de mouvement. Si on avait un mouvement récent NON résolu en
+            # fléchette plantée, et que le board est revenu vide → bounce-out = MISS.
+            if self._motion_since > 0.0:
+                elapsed = now - self._motion_since
+                max_ref = max((r.nonzero_ref for r, _ in motion_results.values()), default=0)
+                board_empty = max_ref < self._motion[next(iter(self._motion))].min_dart_px
+                if elapsed < 1.0 and board_empty and not stable_cameras and not takeout_cameras:
+                    if self._darts_this_turn < MAX_DARTS_PER_TURN and \
+                       (now - self._takeout_time) > self._takeout_cooldown:
+                        self._motion_since = 0.0
+                        await self._handle_bounceout()
+                        return
+                self._motion_since = 0.0
 
         # Log état toutes les ~5 secondes pour debug
         if not hasattr(self, '_debug_tick'):
@@ -186,6 +211,7 @@ class DetectionEngine:
 
     async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
         """Localise et score la fléchette, broadcast le résultat."""
+        self._motion_since = 0.0
         from detection import debug_viz
         from detection.detection.fusion import find_tip_normalized
 
@@ -274,8 +300,20 @@ class DetectionEngine:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
 
+    async def _handle_bounceout(self):
+        """Fléchette qui a touché puis ressorti (bounce-out) = MISS, pas un retrait."""
+        self._darts_this_turn += 1
+        self._last_dart_time = time.time()
+        print(f"[ENGINE] BOUNCE-OUT → MISS ({self._darts_this_turn}/3)", flush=True)
+        logger.info(f"Bounce-out détecté → MISS ({self._darts_this_turn}/3)")
+        await self.event_bus.send_dart(
+            score_label="MISS", score_value=0,
+            camera_info={"bounceout": True, "confidence": 1.0},
+        )
+
     async def _handle_takeout(self):
         """Reset après retrait des fléchettes."""
+        self._motion_since = 0.0
         self._takeout_time = time.time()   # Démarre le cooldown
 
         if self._darts_this_turn == 0:
