@@ -143,7 +143,9 @@ def fuse_detections(
     # les flights (hors plan) divergent. On choisit donc, pour chaque caméra,
     # le bout qui converge avec les autres → redondance robuste.
     AGREE_TOL = 75   # px
-    ON_BOARD = 360   # magnitude max (px) pour qu'un point soit plausible (dans le board)
+    # Zone acceptée jusqu'au surround (au-delà du double à 340) pour compter les MISS.
+    # Le bruit aberrant (homographie qui déraille) est bien au-delà (>500).
+    ON_BOARD = 480
 
     def on_board(p):
         return np.linalg.norm(np.asarray(p) - BOARD_CENTER_NORM) < ON_BOARD
