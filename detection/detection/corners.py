@@ -1,7 +1,7 @@
 """
-Localisation de la fléchette : on cherche les DEUX POINTS LES PLUS ÉLOIGNÉS
-de l'ensemble des pixels de différence = la vraie longueur de la fléchette
-(de la pointe au bout du flight). Évite de se limiter au flight seul.
+Localisation de la fléchette par composantes connexes.
+On isole le plus gros blob allongé (la fléchette), puis on prend ses 2 extrémités.
+Évite de connecter la fléchette à du bruit lointain.
 """
 
 import cv2
@@ -11,14 +11,13 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-MIN_PIXELS = 80          # Pixels minimum pour une fléchette
-MIN_LENGTH = 30          # Longueur minimale (px) entre les 2 extrémités
+MIN_AREA = 80            # Surface minimale du blob fléchette
+MIN_LENGTH = 30          # Longueur minimale entre extrémités
 
 
 @dataclass
 class DartLocation:
-    """Deux extrémités de la fléchette en espace caméra : [pointe?, flight?]."""
-    corners: np.ndarray  # Shape (2, 2)
+    corners: np.ndarray  # Shape (2, 2) : les 2 extrémités
     confidence: float
     corners_count: int
 
@@ -32,32 +31,44 @@ class DartLocation:
 
 
 def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartLocation | None:
-    """
-    Trouve les 2 points les plus éloignés de la silhouette de la fléchette.
-    Retourne ces 2 extrémités (l'orientation pointe/flight est résolue ensuite).
-    """
-    # Ferme les trous pour relier flight + fût en une silhouette continue
+    # Relie les morceaux proches de la fléchette
     kernel = np.ones((5, 5), np.uint8)
     closed = cv2.morphologyEx(diff_frame, cv2.MORPH_CLOSE, kernel, iterations=2)
+    closed = cv2.dilate(closed, kernel, iterations=1)
 
-    ys, xs = np.nonzero(closed)
-    if len(xs) < MIN_PIXELS:
+    # Composantes connexes : isole les blobs séparés
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+    if num <= 1:
         return None
 
+    # Choisit le blob le plus "fléchette" : grand ET allongé
+    best_label = -1
+    best_score = 0.0
+    for lbl in range(1, num):
+        area = stats[lbl, cv2.CC_STAT_AREA]
+        if area < MIN_AREA:
+            continue
+        w = stats[lbl, cv2.CC_STAT_WIDTH]
+        h = stats[lbl, cv2.CC_STAT_HEIGHT]
+        elong = max(w, h) / max(1, min(w, h))   # allongement
+        score = area * elong
+        if score > best_score:
+            best_score = score
+            best_label = lbl
+
+    if best_label < 0:
+        return None
+
+    # Pixels du blob fléchette uniquement
+    ys, xs = np.nonzero(labels == best_label)
     pts = np.column_stack([xs, ys]).astype(np.float32)
-
-    # Enveloppe convexe → les 2 points les plus éloignés sont forcément dessus
-    try:
-        hull = cv2.convexHull(pts).reshape(-1, 2)
-    except cv2.error:
+    if len(pts) < MIN_AREA:
         return None
 
-    if len(hull) < 2:
-        return None
-
-    # Diamètre de l'enveloppe = paire de points la plus éloignée
+    # 2 extrémités via l'enveloppe convexe du blob (isolé du bruit)
+    hull = cv2.convexHull(pts).reshape(-1, 2)
     max_dist = 0.0
-    end1, end2 = hull[0], hull[1]
+    end1, end2 = hull[0], hull[0]
     for i in range(len(hull)):
         for j in range(i + 1, len(hull)):
             d = np.linalg.norm(hull[i] - hull[j])
@@ -69,5 +80,5 @@ def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartL
         return None
 
     corners = np.array([end1, end2], dtype=float)
-    confidence = min(1.0, len(xs) / 2000.0)
-    return DartLocation(corners=corners, confidence=confidence, corners_count=len(xs))
+    confidence = min(1.0, len(pts) / 2000.0)
+    return DartLocation(corners=corners, confidence=confidence, corners_count=len(pts))
