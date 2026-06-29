@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "calibrations"
 
-# Position de chaque caméra autour de la cible
-CAMERA_SIDES = {0: "left", 1: "right", 2: "top"}
+# L'ordre des caméras n'impacte pas la détection (tip = point le plus proche du centre)
 
 # Délai max entre détection d'une caméra et les autres (secondes)
 SYNC_WINDOW = 0.3
@@ -195,7 +194,7 @@ class DetectionEngine:
             diff = cv2.absdiff(ref.astype(np.uint8), gray)
             _, thresh = cv2.threshold(diff, 35, 255, cv2.THRESH_BINARY)
 
-            location = detect_dart_location(thresh, CAMERA_SIDES.get(idx, "left"))
+            location = detect_dart_location(thresh)
             detections[idx] = location
 
         result = fuse_detections(detections, self._homographies)

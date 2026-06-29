@@ -27,7 +27,7 @@ class DartLocation:
     corners_count: int
 
 
-def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "left") -> DartLocation | None:
+def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartLocation | None:
     """
     Localise la fléchette dans une image de différence.
 
