@@ -140,6 +140,14 @@ class DetectionEngine:
             if r.state == MotionState.TAKEOUT
         ]
 
+        # Log état mouvement toutes les 3 secondes pour debug
+        if not hasattr(self, '_debug_tick'):
+            self._debug_tick = 0
+        self._debug_tick += 1
+        if self._debug_tick % 90 == 0:
+            for idx, (r, _) in motion_results.items():
+                logger.info(f"[DEBUG] Cam{idx} état={r.state.value} pixels={r.nonzero_pixels}")
+
         if takeout_cameras:
             await self._handle_takeout()
             return

@@ -36,10 +36,10 @@ class MotionDetector:
 
     def __init__(
         self,
-        min_pixels: int = 800,      # Seuil bas : début de mouvement
-        max_pixels: int = 25000,    # Seuil haut : retrait des fléchettes
-        stable_frames: int = 8,     # Frames consécutives stables pour confirmer
-        threshold: int = 35,        # Seuil binaire sur la différence
+        min_pixels: int = 200,      # Seuil bas : début de mouvement
+        max_pixels: int = 30000,    # Seuil haut : retrait des fléchettes
+        stable_frames: int = 4,     # Frames consécutives stables pour confirmer
+        threshold: int = 20,        # Seuil binaire sur la différence
     ):
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
