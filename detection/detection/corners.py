@@ -117,28 +117,19 @@ def _filter_by_line(corners: np.ndarray, shape: tuple) -> np.ndarray | None:
 
 def _find_tip(corners: np.ndarray, camera_side: str) -> np.ndarray | None:
     """
-    La pointe de la fléchette est le point le plus éloigné dans la direction
-    de la cible selon la position de la caméra.
+    La pointe est le point du cluster de corners LE PLUS PROCHE du centre du board
+    dans l'image caméra (la pointe est enfoncée dans la cible, le fût s'éloigne).
+    Le centre approximatif de la cible dans l'image = centre de l'image caméra.
     """
-    pts = corners.reshape(-1, 2)
-    if camera_side == "right":
-        idx = np.argmin(pts[:, 0])   # La caméra droite voit la pointe à gauche
-    elif camera_side == "left":
-        idx = np.argmax(pts[:, 0])   # La caméra gauche voit la pointe à droite
-    else:  # "top"
-        idx = np.argmax(pts[:, 1])   # La caméra haute voit la pointe en bas
-    return pts[idx]
+    pts = corners.reshape(-1, 2).astype(float)
+    board_center = np.array([640.0, 360.0])  # Centre approx pour 1280x720
 
-
-def _find_tip_fallback(corners: np.ndarray, camera_side: str, excluded: np.ndarray) -> np.ndarray | None:
-    pts = corners.reshape(-1, 2)
-    # Exclut le point déjà testé et reprend le suivant
-    distances = np.linalg.norm(pts - excluded, axis=1)
-    pts_sorted = pts[np.argsort(distances)[::-1]]
-    for candidate in pts_sorted[1:]:
-        if _count_neighbors(candidate, corners) >= MIN_NEIGHBORS:
-            return candidate
-    return None
+    distances = np.linalg.norm(pts - board_center, axis=1)
+    # Moyenne des 20% de points les plus proches du centre = zone de la pointe
+    n = max(1, len(distances) // 5)
+    closest_idx = np.argsort(distances)[:n]
+    tip = pts[closest_idx].mean(axis=0)
+    return tip
 
 
 def _count_neighbors(point: np.ndarray, corners: np.ndarray) -> int:

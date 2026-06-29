@@ -55,6 +55,8 @@ class DetectionEngine:
         self._running = False
         self._darts_this_turn = 0
         self._last_dart_time = 0.0
+        self._takeout_time = 0.0   # timestamp du dernier retrait
+        self._takeout_cooldown = 2.0  # secondes à ignorer après retrait
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -147,11 +149,6 @@ class DetectionEngine:
             if r.state == MotionState.TAKEOUT
         ]
 
-        if stable_cameras:
-            print(f"[ENGINE] DART_STABLE détecté sur cams {stable_cameras}", flush=True)
-        if takeout_cameras:
-            print(f"[ENGINE] TAKEOUT détecté sur cams {takeout_cameras}", flush=True)
-
         # Log état toutes les ~5 secondes pour debug
         if not hasattr(self, '_debug_tick'):
             self._debug_tick = 0
@@ -161,10 +158,17 @@ class DetectionEngine:
                 print(f"[ENGINE] Cam{idx} état={r.state.value} consec={r.nonzero_consec} ref={r.nonzero_ref}", flush=True)
 
         if takeout_cameras:
+            print(f"[ENGINE] TAKEOUT sur cams {takeout_cameras}", flush=True)
             await self._handle_takeout()
             return
 
-        if stable_cameras and self._darts_this_turn < MAX_DARTS_PER_TURN:
+        # Ignore DART_STABLE pendant le cooldown post-retrait
+        in_cooldown = (time.time() - self._takeout_time) < self._takeout_cooldown
+
+        if stable_cameras:
+            print(f"[ENGINE] DART_STABLE cams={stable_cameras} cooldown={in_cooldown}", flush=True)
+
+        if stable_cameras and not in_cooldown and self._darts_this_turn < MAX_DARTS_PER_TURN:
             # Attend brièvement que les autres caméras se stabilisent aussi
             await asyncio.sleep(0.1)
             frames_stable = self.cameras.read_all()
@@ -230,6 +234,8 @@ class DetectionEngine:
 
     async def _handle_takeout(self):
         """Reset après retrait des fléchettes."""
+        self._takeout_time = time.time()   # Démarre le cooldown
+
         if self._darts_this_turn == 0:
             return   # Faux positif, ignore
 
