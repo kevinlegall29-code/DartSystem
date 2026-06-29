@@ -242,16 +242,37 @@ def fuse_detections(
             confidence, agreement, method = 0.7, False, "intersection"
         else:
             # MÉTHODE 3 : meilleure caméra ayant un bout DANS le board
+            lengths = dict(zip(cam_indices, [l[2] for l in lines]))
             onboard_cams = [
                 c for c in cam_indices if any(on_board(p) for p in cand[c])
             ]
             if not onboard_cams:
                 logger.info("FUSION : aucun point plausible dans le board")
                 return None
-            lengths = dict(zip(cam_indices, [l[2] for l in lines]))
+
             best_cam = max(onboard_cams, key=lambda c: lengths[c])
+
+            # Une ligne COURTE = vue raccourcie (fléchette de bout) → peu fiable :
+            # la caméra voit surtout le flight. Si la seule caméra on-board est
+            # courte et qu'une caméra à LIGNE LONGUE voit la fléchette hors-zone
+            # → c'est un MISS (fléchette dans le surround), pas un score intérieur.
+            MIN_RELIABLE = 160
+            if lengths[best_cam] < MIN_RELIABLE:
+                long_cams = [c for c in cam_indices if lengths[c] >= 250]
+                long_outside = [
+                    c for c in long_cams
+                    if all(not on_board(p) for p in cand[c])  # tous bouts hors-board
+                ]
+                if long_outside:
+                    logger.info(f"FUSION [MISS] cam courte {best_cam} (L={lengths[best_cam]:.0f}) "
+                                f"vs cams longues hors-zone {long_outside}")
+                    miss = position_to_score(400.0, 760.0)   # point hors board = MISS
+                    return FusedDartResult(
+                        score=miss, x_normalized=400.0, y_normalized=760.0,
+                        cameras_used=long_outside, confidence=0.6, agreement=False,
+                    )
+
             # Pointe = corners[0] (vote densité/centroïde de corners.py).
-            # Si ce bout est hors-board (garbage), on prend l'autre s'il est on-board.
             tip_cand = cand[best_cam][0]
             if not on_board(tip_cand) and on_board(cand[best_cam][1]):
                 tip_cand = cand[best_cam][1]
