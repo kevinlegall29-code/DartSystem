@@ -237,11 +237,19 @@ class DetectionEngine:
         ]
         if board_changed:
             print(f"[ENGINE] Cible/lumière changée sur cams {board_changed} — référence recapturée", flush=True)
-            # Met à jour aussi la référence "board vide" pour la validation du retrait
             for idx, (r, pf) in motion_results.items():
                 if r.state == MotionState.BOARD_CHANGED:
                     self._empty_reference[idx] = self._gray(pf)
             return
+
+        # Rafraîchit en continu la référence "board vide" tant qu'AUCUNE fléchette
+        # n'est sur le board (idle). Suit la dérive lumière → validation retrait fiable.
+        if (self._darts_this_turn == 0 and not stable_cameras
+                and not takeout_cameras and not motion_cameras
+                and (time.time() - self._takeout_time) > self._takeout_cooldown):
+            for idx, (r, pf) in motion_results.items():
+                if r.state == MotionState.IDLE:
+                    self._empty_reference[idx] = self._gray(pf)
 
         # TAKEOUT seulement si AU MOINS 2 caméras le voient (évite faux positifs)
         if len(takeout_cameras) >= 2:
