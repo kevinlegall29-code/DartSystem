@@ -7,7 +7,9 @@ import math
 from dataclasses import dataclass
 
 CENTER = (400.0, 400.0)
-REFERENCE_ANGLE_DEG = 81.0   # Rotation pour aligner le 20 à 12h — ajustable via API
+
+# Offset angulaire fin (réglable via slider), 0 par défaut.
+REFERENCE_ANGLE_DEG = 0.0
 
 # Rayons en pixels dans l'espace normalisé 800×800
 RING_RADII = [
@@ -19,8 +21,11 @@ RING_RADII = [
     340,   # 5 — Limite double / miss
 ]
 
-# Secteurs dans le sens horaire depuis 12h (le 20 est en haut)
-SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]
+# La calibration place les FRONTIÈRES de secteurs en haut/droite/bas/gauche
+# (frontière 20/1 en haut). En partant du haut dans le sens HORAIRE, le 1er
+# secteur (0-18°) est le "1" (juste après la frontière 20/1), etc.
+# Le 20 est donc le dernier secteur (342-360°).
+SECTORS = [1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5, 20]
 SECTOR_ANGLE = 360.0 / len(SECTORS)   # 18° par secteur
 
 
@@ -43,16 +48,15 @@ def position_to_score(x: float, y: float) -> DartScore:
     """
     cx, cy = CENTER
 
-    # Vecteur depuis le centre (axe Y inversé pour coordonnées mathématiques)
-    vx = x - cx
-    vy = cy - y
+    # Coordonnées image (y vers le bas)
+    dx = x - cx
+    dy = y - cy
 
-    magnitude = math.sqrt(vx * vx + vy * vy)
+    magnitude = math.sqrt(dx * dx + dy * dy)
 
-    # Calcul de l'angle. atan2 augmente en anti-horaire, mais SECTORS est listé
-    # en horaire → on inverse le sens pour éviter l'effet miroir (17↔19).
-    angle_raw = math.degrees(math.atan2(vy, vx))
-    angle = math.fmod((REFERENCE_ANGLE_DEG - angle_raw + 360.0), 360.0)
+    # Angle HORAIRE depuis le haut (12h) : haut=0°, droite=90°, bas=180°, gauche=270°.
+    # atan2(dx, -dy) donne exactement cet angle horaire-depuis-le-haut.
+    angle = math.fmod(math.degrees(math.atan2(dx, -dy)) + REFERENCE_ANGLE_DEG + 360.0, 360.0)
 
     # Détermination de l'anneau
     ring = _get_ring(magnitude)
