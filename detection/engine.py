@@ -36,6 +36,23 @@ MAX_DARTS_PER_TURN = 3
 N_SAMPLES = 4
 
 
+def _touches_border(mask: np.ndarray, margin: int = 10, min_px: int = 60) -> bool:
+    """
+    True si le mouvement touche le bord de l'image (= bras/corps entrant
+    depuis hors-champ). Une fléchette qui rebondit est intérieure.
+    """
+    if mask is None:
+        return False
+    h, w = mask.shape[:2]
+    edges = (
+        int(np.count_nonzero(mask[:margin])) +
+        int(np.count_nonzero(mask[-margin:])) +
+        int(np.count_nonzero(mask[:, :margin])) +
+        int(np.count_nonzero(mask[:, -margin:]))
+    )
+    return edges > min_px
+
+
 class DetectionEngine:
     """
     Boucle principale de détection.
@@ -61,6 +78,7 @@ class DetectionEngine:
         self._takeout_time = 0.0   # timestamp du dernier retrait
         self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
         self._motion_since = 0.0   # début du dernier mouvement non résolu (bounce-out)
+        self._motion_was_arm = False  # le mouvement a-t-il touché le bord (bras) ?
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -157,29 +175,35 @@ class DetectionEngine:
             if r.state == MotionState.MOTION
         ]
 
-        # --- Suivi bounce-out : une fléchette qui apparaît puis disparaît ---
+        # --- Suivi bounce-out : fléchette qui touche puis ressort ---
+        # Discriminateur clé : un BRAS entre par le BORD de l'image (rattaché au
+        # joueur), une FLÉCHETTE qui rebondit est un petit objet INTÉRIEUR.
         now = time.time()
         if motion_cameras:
             if self._motion_since == 0.0:
                 self._motion_since = now
+                self._motion_was_arm = False
+            # Détecte si le mouvement touche le bord sur une caméra = bras/corps
+            for idx, (r, _) in motion_results.items():
+                if r.state == MotionState.MOTION and r.motion_mask is not None:
+                    if _touches_border(r.motion_mask):
+                        self._motion_was_arm = True
         else:
-            # Plus de mouvement. Si on avait un mouvement récent NON résolu en
-            # fléchette plantée, et que le board est revenu vide → bounce-out = MISS.
             if self._motion_since > 0.0:
                 elapsed = now - self._motion_since
                 max_ref = max((r.nonzero_ref for r, _ in motion_results.values()), default=0)
                 board_empty = max_ref < self._motion[next(iter(self._motion))].min_dart_px
-                # Garde-temps : pas de bounce-out juste après une vraie fléchette
-                # (la référence vient d'être mise à jour avec la fléchette plantée)
                 recent_dart = (now - self._last_dart_time) < 1.5
-                if (elapsed < 1.0 and board_empty and not stable_cameras
-                        and not takeout_cameras and not recent_dart):
+                # Bounce-out = mouvement bref, INTÉRIEUR (pas un bras), board revenu vide
+                if (elapsed < 1.2 and board_empty and not self._motion_was_arm
+                        and not stable_cameras and not takeout_cameras and not recent_dart):
                     if self._darts_this_turn < MAX_DARTS_PER_TURN and \
                        (now - self._takeout_time) > self._takeout_cooldown:
                         self._motion_since = 0.0
                         await self._handle_bounceout()
                         return
                 self._motion_since = 0.0
+                self._motion_was_arm = False
 
         # Log état toutes les ~5 secondes pour debug
         if not hasattr(self, '_debug_tick'):

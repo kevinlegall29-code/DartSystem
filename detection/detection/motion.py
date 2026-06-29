@@ -30,6 +30,7 @@ class MotionResult:
     diff_ref:        np.ndarray | None = None   # diff avec référence (board vide)
     nonzero_consec:  int = 0                    # pixels qui bougent entre T-1 et T
     nonzero_ref:     int = 0                    # pixels différents vs référence
+    motion_mask:     np.ndarray | None = None   # masque du mouvement consécutif (T-1→T)
 
 
 class MotionDetector:
@@ -105,7 +106,8 @@ class MotionDetector:
         if nonzero_consec > self.min_motion_px:
             self._in_motion    = True
             self._stable_count = 0
-            return MotionResult(MotionState.MOTION, thresh_ref, nonzero_consec, nonzero_ref)
+            return MotionResult(MotionState.MOTION, thresh_ref, nonzero_consec, nonzero_ref,
+                                motion_mask=thresh_consec)
 
         # Diff énorme avec la référence + scène stable = la cible a bougé ou
         # la lumière a changé (PAS une fléchette). On recapture la référence.
