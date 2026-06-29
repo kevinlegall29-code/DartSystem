@@ -179,10 +179,6 @@ class DetectionEngine:
         detections = {}
 
         for idx in self._homographies:
-            # CAM1 (dessus) : mouvement uniquement, pas de localisation de pointe
-            if idx not in TIP_CAMERAS:
-                detections[idx] = None
-                continue
 
             frame = frames.get(idx)
             if frame is None:

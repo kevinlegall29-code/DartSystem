@@ -34,28 +34,37 @@ BOARD_CENTER_NORM = np.array([400.0, 400.0])
 
 def find_tip_normalized(location: DartLocation, homography: np.ndarray) -> tuple[float, float] | None:
     """
-    Transforme TOUS les corners en espace normalisé et retourne la pointe :
-    le point le plus proche du centre du board (400, 400).
-    La pointe est enfoncée dans le board = la plus proche du centre en espace normalisé.
+    Trouve la pointe en transformant les DEUX EXTRÉMITÉS de la droite fléchette.
+    La pointe = l'extrémité la plus proche du centre du board (400,400) en espace normalisé.
+    Fonctionne pour toutes les positions de caméra (côté, dessus, dessous).
     """
-    pts = location.corners.reshape(-1, 1, 2).astype(np.float32)
+    corners = location.corners.reshape(-1, 2).astype(np.float32)
+    if len(corners) < 2:
+        return None
+
+    # Ajuste une droite à tous les corners (le fût de la fléchette)
+    line = cv2.fitLine(corners.reshape(-1, 1, 2), cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
+    vx, vy, x0, y0 = float(line[0]), float(line[1]), float(line[2]), float(line[3])
+
+    # Projette tous les corners sur la droite, trouve les deux extrémités
+    direction = np.array([vx, vy])
+    ts = (corners - np.array([x0, y0])) @ direction
+    t_min, t_max = float(ts.min()), float(ts.max())
+
+    end1 = np.array([x0 + t_min * vx, y0 + t_min * vy], dtype=np.float32)
+    end2 = np.array([x0 + t_max * vx, y0 + t_max * vy], dtype=np.float32)
+
+    # Transforme les deux extrémités en espace normalisé
+    pts = np.array([[end1], [end2]], dtype=np.float32)
     transformed = cv2.perspectiveTransform(pts, homography)
-    pts_norm = transformed.reshape(-1, 2)
+    norm1 = transformed[0][0]
+    norm2 = transformed[1][0]
 
-    # Filtre les points en dehors du board (magnitude > 380px)
-    distances = np.linalg.norm(pts_norm - BOARD_CENTER_NORM, axis=1)
-    valid = distances < 380
-    if not valid.any():
-        # Aucun point dans le board — prend quand même le plus proche
-        pass
-    else:
-        pts_norm = pts_norm[valid]
-        distances = distances[valid]
+    # La pointe = l'extrémité la plus proche du centre (enfoncée dans le board)
+    d1 = np.linalg.norm(norm1 - BOARD_CENTER_NORM)
+    d2 = np.linalg.norm(norm2 - BOARD_CENTER_NORM)
 
-    # Moyenne des 20% de corners les plus proches du centre = zone de la pointe
-    n = max(1, len(distances) // 5)
-    tip_idx = np.argsort(distances)[:n]
-    tip = pts_norm[tip_idx].mean(axis=0)
+    tip = norm1 if d1 <= d2 else norm2
     return float(tip[0]), float(tip[1])
 
 
