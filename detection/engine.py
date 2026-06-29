@@ -87,19 +87,26 @@ class DetectionEngine:
 
     async def run(self):
         """Boucle principale asynchrone. Appeler avec asyncio.create_task()."""
+        print("[ENGINE] Démarrage...", flush=True)
         self.load_calibrations()
         self._running = True
-        logger.info("Moteur de détection démarré")
+        print(f"[ENGINE] Caméras : {list(self.cameras.cameras.keys())}", flush=True)
+        print(f"[ENGINE] Homographies chargées : {list(self._homographies.keys())}", flush=True)
 
-        # Initialise les références de mouvement
         await self._init_references()
+        print("[ENGINE] Références initialisées, détection active", flush=True)
 
+        cycle = 0
         while self._running:
             try:
                 await self._detection_cycle()
             except Exception as e:
+                print(f"[ENGINE] Erreur cycle : {e}", flush=True)
                 logger.error(f"Erreur cycle détection : {e}", exc_info=True)
-            await asyncio.sleep(0.03)   # ~30 Hz
+            cycle += 1
+            if cycle % 100 == 0:
+                print(f"[ENGINE] Cycle {cycle} — toujours actif", flush=True)
+            await asyncio.sleep(0.05)   # ~20 Hz
 
     async def stop(self):
         self._running = False
