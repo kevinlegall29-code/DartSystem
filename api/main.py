@@ -24,17 +24,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import threading
     from api.routes.cameras import camera_manager
 
     engine = DetectionEngine(camera_manager, event_bus)
-    task = asyncio.create_task(engine.run())
     app.state.engine = engine
+
+    # Lance le moteur dans un thread séparé pour ne pas bloquer l'event loop asyncio
+    loop = asyncio.get_event_loop()
+    def run_engine():
+        asyncio.run(engine.run())
+
+    thread = threading.Thread(target=run_engine, daemon=True)
+    thread.start()
 
     logger.info("DartSystem API + moteur de détection démarrés")
     yield
 
     await engine.stop()
-    task.cancel()
     camera_manager.stop_all()
     logger.info("DartSystem arrêté proprement")
 

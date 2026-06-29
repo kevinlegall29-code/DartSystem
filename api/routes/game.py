@@ -88,7 +88,11 @@ async def game_ws(ws: WebSocket):
         await ws.send_json({"type": "game_state", "data": _game_state})
         while True:
             await ws.receive_text()
-    except (WebSocketDisconnect, Exception):
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket game erreur : {type(e).__name__}: {e}")
+    finally:
         event_bus.disconnect(ws)
 
 

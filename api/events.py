@@ -36,10 +36,11 @@ class EventBus:
         """Envoie un événement JSON à tous les clients."""
         message = json.dumps({"type": event_type, "data": data})
         dead = set()
-        for ws in self._clients:
+        for ws in set(self._clients):
             try:
                 await ws.send_text(message)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Broadcast échoué : {e}")
                 dead.add(ws)
         for ws in dead:
             self._clients.discard(ws)

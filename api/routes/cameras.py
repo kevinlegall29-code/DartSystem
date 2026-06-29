@@ -66,7 +66,7 @@ async def mjpeg_stream(camera_index: int):
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
                 )
-            await asyncio.sleep(0.033)   # ~30 fps
+            await asyncio.sleep(0.1)   # ~10 fps (réduit la charge sur l'event loop)
 
     return StreamingResponse(
         generate(),
