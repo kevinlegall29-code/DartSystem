@@ -138,38 +138,42 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    # Pointe par caméra : extrémité vers le centre du board (sur le plan).
-    tips = []
-    for cam_idx in cam_indices:
+    # Pointe par caméra + longueur de ligne (fiabilité de la vue)
+    tips = {}        # cam_idx -> (point_norm, longueur)
+    for cam_idx, (p, d, length) in zip(cam_indices, lines):
         tip = find_tip_normalized(detections[cam_idx], homographies[cam_idx])
         if tip is not None:
-            tips.append(np.array(tip))
+            tips[cam_idx] = (np.array(tip), length)
             s = position_to_score(*tip)
-            logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) → {s.label}")
+            logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) L={length:.0f} → {s.label}")
 
     if not tips:
         return None
 
-    tips = np.array(tips)
+    # Trie les caméras par longueur de ligne décroissante (meilleure vue d'abord)
+    ranked = sorted(tips.items(), key=lambda kv: kv[1][1], reverse=True)
+    best_cam, (best_tip, best_len) = ranked[0]
 
-    if len(tips) >= 2:
-        # Médiane composante par composante : robuste à une caméra aberrante
-        med = np.median(tips, axis=0)
-        # Garde les pointes proches de la médiane (< 80px), moyenne-les
-        dists = np.linalg.norm(tips - med, axis=1)
-        inliers = tips[dists < 80]
-        final = inliers.mean(axis=0) if len(inliers) >= 2 else med
-    else:
-        final = tips[0]
+    # Cherche une 2e caméra qui CONFIRME la meilleure (pointe < 70px)
+    confirmers = [best_tip]
+    used = [best_cam]
+    for cam_idx, (tip, length) in ranked[1:]:
+        if np.linalg.norm(tip - best_tip) < 70:
+            confirmers.append(tip)
+            used.append(cam_idx)
 
+    final = np.mean(confirmers, axis=0)
     x_final, y_final = float(final[0]), float(final[1])
     score = position_to_score(x_final, y_final)
-    logger.info(f"MÉDIANE {len(tips)} pointes → ({x_final:.0f},{y_final:.0f}) = {score.label}")
+
+    confirmed = len(confirmers) >= 2
+    logger.info(f"MEILLEURE cam{best_cam} (L={best_len:.0f}) confirmée par {used} → "
+                f"({x_final:.0f},{y_final:.0f}) = {score.label}")
 
     return FusedDartResult(
         score=score, x_normalized=x_final, y_normalized=y_final,
-        cameras_used=cam_indices, confidence=float(np.mean(confs)),
-        agreement=len(tips) >= 2,
+        cameras_used=used, confidence=0.9 if confirmed else 0.5,
+        agreement=confirmed,
     )
 
 
