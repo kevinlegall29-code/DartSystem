@@ -23,7 +23,7 @@ class CameraStream:
 
     # ------------------------------------------------------------------
     def start(self) -> "CameraStream":
-        self._cap = cv2.VideoCapture(self.index, cv2.CAP_V4L2)
+        self._cap = cv2.VideoCapture(self.index)
         if not self._cap.isOpened():
             raise RuntimeError(f"Impossible d'ouvrir la caméra {self.index}")
 

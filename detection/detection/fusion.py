@@ -3,12 +3,12 @@ Fusion des détections des 3 caméras pour obtenir la position finale.
 Stratégie : vote pondéré par la confiance + validation de cohérence.
 """
 
+import cv2
 import numpy as np
 import logging
 from dataclasses import dataclass
 
-from detection.corners import DartLocation
-from detection.calibration.board import normalize_frame, CALIB_POINTS_DST
+from detection.detection.corners import DartLocation
 from detection.scoring.board_mapping import DartScore, position_to_score
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,6 @@ def fuse_detections(
     detections   : {camera_index: DartLocation | None}
     homographies : {camera_index: np.ndarray 3×3}
     """
-    import cv2
-
     # Transforme chaque détection valide en espace normalisé
     normalized: dict[int, tuple[float, float]] = {}
     confidences: dict[int, float] = {}
