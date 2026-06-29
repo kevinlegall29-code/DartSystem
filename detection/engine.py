@@ -34,6 +34,10 @@ MAX_DARTS_PER_TURN = 3
 
 # Nombre de passes de détection moyennées (médiane) pour réduire le jitter
 N_SAMPLES = 3
+
+# Sauvegarde des images de debug (lourd : 6 warps + écriture disque par fléchette).
+# Désactivé par défaut pour la fluidité — activer seulement pour le réglage.
+DEBUG_VIZ = False
 SAMPLE_DELAY = 0.03   # secondes entre passes de moyennage
 POST_DART_COOLDOWN = 0.35   # garde-temps après une fléchette (évite re-détection)
 
@@ -159,16 +163,22 @@ class DetectionEngine:
         g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return cv2.GaussianBlur(g, (5, 5), 0)
 
-    async def _detection_cycle(self):
-        frames = self.cameras.read_all()
+    def _process_motion(self, frames: dict) -> dict:
+        """Traitement OpenCV du mouvement (sync, exécuté dans un thread)."""
         motion_results = {}
-
         for idx, frame in frames.items():
             if frame is None:
                 continue
             processed = self._preprocess(frame, idx)
             result = self._motion[idx].process(processed)
             motion_results[idx] = (result, processed)
+        return motion_results
+
+    async def _detection_cycle(self):
+        frames = self.cameras.read_all()
+        loop = asyncio.get_event_loop()
+        # Traitement OpenCV déporté dans un thread → serveur reste réactif
+        motion_results = await loop.run_in_executor(None, self._process_motion, frames)
 
         # Détecte les états
         stable_cameras = [
@@ -323,8 +333,11 @@ class DetectionEngine:
         samples = []
         result = None
         detections = processed_frames = thresh_frames = None
+        loop = asyncio.get_event_loop()
         for s in range(N_SAMPLES):
-            r, det, pf, tf = self._detect_pass(self.cameras.read_all())
+            # Calcul OpenCV lourd déporté dans un thread → ne bloque pas le serveur
+            frames_now = self.cameras.read_all()
+            r, det, pf, tf = await loop.run_in_executor(None, self._detect_pass, frames_now)
             if r is not None:
                 samples.append((r.x_normalized, r.y_normalized))
                 result, detections, processed_frames, thresh_frames = r, det, pf, tf
@@ -359,9 +372,9 @@ class DetectionEngine:
         if detections is None:
             return
 
-        # --- DEBUG : sauvegarde les images annotées avec le consensus final ---
+        # --- DEBUG : sauvegarde les images annotées (désactivé par défaut = fluidité) ---
         consensus = (result.x_normalized, result.y_normalized) if result else None
-        for idx in self._homographies:
+        for idx in (self._homographies if DEBUG_VIZ else {}):
             if idx not in processed_frames:
                 continue
             try:
