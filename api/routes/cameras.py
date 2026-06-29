@@ -9,12 +9,27 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 from detection.cameras.stream import CameraManager
+from detection import config as cfg
 from api.events import event_bus
 
 router = APIRouter()
 
+# Charge l'exposition sauvegardée (défaut 1200)
+_config = cfg.load()
+_exposure = _config.get("exposure", 1200)
+
 camera_manager = CameraManager(device_indices=(0, 2, 4))
 camera_manager.start_all()
+
+# Applique l'exposition sauvegardée au démarrage
+def _apply_exposure(value: int):
+    for cam in camera_manager.cameras.values():
+        if cam._cap and cam._cap.isOpened():
+            cam._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+            cam._cap.set(cv2.CAP_PROP_EXPOSURE, value)
+            cam.exposure = value
+
+_apply_exposure(_exposure)
 
 
 @router.get("/status")
@@ -23,27 +38,28 @@ async def cameras_status():
 
 
 @router.post("/exposure/{value}")
-async def set_exposure(value: int):
-    """Règle l'exposition sur toutes les caméras (valeur V4L2, typiquement 50–500)."""
-    results = {}
-    for idx, cam in camera_manager.cameras.items():
-        if cam._cap and cam._cap.isOpened():
-            cam._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-            ok = cam._cap.set(cv2.CAP_PROP_EXPOSURE, value)
-            cam.exposure = value
-            results[idx] = "ok" if ok else "erreur"
-        else:
-            results[idx] = "non disponible"
-    return {"exposure": value, "cameras": results}
+async def set_exposure(value: int, request=None):
+    """Règle et sauvegarde l'exposition. Réinitialise les références du moteur."""
+    from api.main import app
+    _apply_exposure(value)
+    cfg.save({"exposure": value})
+
+    # Réinitialise les références du moteur pour éviter les fausses détections
+    try:
+        engine = app.state.engine
+        await engine._init_references()
+    except Exception:
+        pass
+
+    return {"exposure": value, "saved": True}
 
 
 @router.get("/snapshot/{camera_index}")
 async def snapshot(camera_index: int):
-    """Retourne une frame JPEG en base64 pour la caméra donnée."""
-    frame = camera_manager.cameras.get(camera_index, {})
-    if not frame:
+    cam = camera_manager.cameras.get(camera_index)
+    if not cam:
         return {"error": f"Caméra {camera_index} introuvable"}
-    img = camera_manager.cameras[camera_index].read()
+    img = cam.read()
     if img is None:
         return {"error": "Frame non disponible"}
     _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -52,8 +68,6 @@ async def snapshot(camera_index: int):
 
 @router.get("/stream/{camera_index}")
 async def mjpeg_stream(camera_index: int):
-    """Stream MJPEG pour prévisualisation en temps réel (calibration UI)."""
-
     async def generate():
         cam = camera_manager.cameras.get(camera_index)
         if cam is None:
@@ -66,7 +80,7 @@ async def mjpeg_stream(camera_index: int):
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
                 )
-            await asyncio.sleep(0.1)   # ~10 fps (réduit la charge sur l'event loop)
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(
         generate(),
@@ -76,10 +90,9 @@ async def mjpeg_stream(camera_index: int):
 
 @router.websocket("/ws")
 async def camera_ws(ws: WebSocket):
-    """WebSocket de statut caméras (utilisé par l'app pour la supervision)."""
     await event_bus.connect(ws)
     try:
         while True:
-            await ws.receive_text()   # Maintient la connexion
+            await ws.receive_text()
     except WebSocketDisconnect:
         event_bus.disconnect(ws)

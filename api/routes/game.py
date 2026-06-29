@@ -3,7 +3,10 @@ Routes de jeu : start, stop, score manuel, WebSocket temps réel.
 """
 
 import asyncio
+import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 
 from api.events import event_bus
@@ -87,11 +90,16 @@ async def game_ws(ws: WebSocket):
     try:
         await ws.send_json({"type": "game_state", "data": _game_state})
         while True:
-            await ws.receive_text()
+            try:
+                # Attend un message avec timeout — garde la connexion vivante
+                await asyncio.wait_for(ws.receive_text(), timeout=60.0)
+            except asyncio.TimeoutError:
+                # Pas de message depuis 60s, envoie un ping pour vérifier
+                await ws.send_json({"type": "ping"})
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        logger.error(f"WebSocket game erreur : {type(e).__name__}: {e}")
+    except Exception:
+        pass
     finally:
         event_bus.disconnect(ws)
 
