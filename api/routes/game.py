@@ -84,12 +84,11 @@ async def takeout():
 async def game_ws(ws: WebSocket):
     """WebSocket principal — l'app Flutter se connecte ici pour recevoir les scores."""
     await event_bus.connect(ws)
-    # Envoie l'état courant dès la connexion
-    await ws.send_json({"type": "game_state", "data": _game_state})
     try:
+        await ws.send_json({"type": "game_state", "data": _game_state})
         while True:
             await ws.receive_text()
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         event_bus.disconnect(ws)
 
 
