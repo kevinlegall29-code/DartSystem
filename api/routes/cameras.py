@@ -38,6 +38,18 @@ async def cameras_status():
     return {"cameras": camera_manager.status()}
 
 
+@router.get("/debug/{name}")
+async def debug_image(name: str):
+    """Sert les images de debug (cam0_detect.jpg, cam0_norm.jpg, etc.)."""
+    from fastapi.responses import FileResponse, Response
+    from pathlib import Path
+    path = Path(__file__).parent.parent.parent / "data" / "debug" / name
+    if not path.exists() or ".." in name:
+        return Response(status_code=404)
+    return FileResponse(str(path), media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.post("/exposure/{value}")
 async def set_exposure(value: int, request=None):
     """Règle et sauvegarde l'exposition. Réinitialise les références du moteur."""

@@ -176,6 +176,9 @@ class DetectionEngine:
 
     async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
         """Localise et score la fléchette, broadcast le résultat."""
+        from detection import debug_viz
+        from detection.detection.fusion import find_tip_normalized
+
         detections = {}
 
         for idx in self._homographies:
@@ -198,6 +201,27 @@ class DetectionEngine:
 
             location = detect_dart_location(thresh)
             detections[idx] = location
+
+            # --- DEBUG : sauvegarde les images annotées ---
+            try:
+                endpoints = location.corners if location else None
+                tip_norm = find_tip_normalized(location, self._homographies[idx]) if location else None
+                tip_cam = None
+                if location and endpoints is not None and len(endpoints) >= 2:
+                    # Retrouve quelle extrémité est la pointe (la plus proche du centre normalisé)
+                    H = self._homographies[idx]
+                    pts = endpoints.reshape(-1, 1, 2).astype(np.float32)
+                    tr = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
+                    dists = np.linalg.norm(tr - np.array([400.0, 400.0]), axis=1)
+                    tip_cam = endpoints[int(np.argmin(dists))]
+                lbl = ""
+                if tip_norm:
+                    from detection.scoring.board_mapping import position_to_score
+                    lbl = position_to_score(tip_norm[0], tip_norm[1]).label
+                debug_viz.save_camera_detection(idx, processed, thresh, endpoints, tip_cam)
+                debug_viz.save_normalized_view(idx, processed, self._homographies[idx], tip_norm, lbl)
+            except Exception as e:
+                print(f"[DEBUG] Erreur viz cam{idx}: {e}", flush=True)
 
         result = fuse_detections(detections, self._homographies)
 
