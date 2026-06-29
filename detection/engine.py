@@ -485,6 +485,9 @@ class DetectionEngine:
         self._darts_this_turn = 0
         self._motion_since = 0.0
         self._motion_accum = {}
+        # Purge les cooldowns pour ne pas bloquer la 1re fléchette du nouveau tour
+        self._takeout_time = 0.0
+        self._last_dart_time = 0.0
 
     async def _wait_until_stable(self, needed: int = 6, timeout: float = 6.0):
         """Attend N frames consécutives sans mouvement (bras hors champ)."""
