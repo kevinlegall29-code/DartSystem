@@ -1,0 +1,17 @@
+{
+  "name": "Default",
+  "primaryColor": "#1565C0",
+  "secondaryColor": "#0D47A1",
+  "backgroundColor": "#0A0A0A",
+  "surfaceColor": "#1A1A2E",
+  "accentColor": "#FFD700",
+  "textColor": "#FFFFFF",
+  "fontFamily": "Roboto",
+  "logo": null,
+  "backgroundImage": null,
+  "modules": {
+    "payment": false,
+    "stats": true,
+    "multiplayer": true
+  }
+}

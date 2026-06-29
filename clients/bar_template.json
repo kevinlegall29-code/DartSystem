@@ -1,0 +1,22 @@
+{
+  "name": "Bar Template",
+  "primaryColor": "#C0392B",
+  "secondaryColor": "#922B21",
+  "backgroundColor": "#1A0A00",
+  "surfaceColor": "#2C1810",
+  "accentColor": "#F39C12",
+  "textColor": "#FFFFFF",
+  "fontFamily": "Oswald",
+  "logo": "assets/clients/bar_template/logo.png",
+  "backgroundImage": null,
+  "modules": {
+    "payment": true,
+    "stats": true,
+    "multiplayer": true
+  },
+  "payment": {
+    "price_per_game": 1.00,
+    "currency": "EUR",
+    "gpio_pin": 17
+  }
+}

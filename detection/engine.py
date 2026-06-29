@@ -1,0 +1,238 @@
+"""
+Moteur principal de détection.
+Orchestre : caméras → motion → corners → fusion → score → WebSocket.
+"""
+
+import asyncio
+import logging
+import time
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from detection.cameras.stream import CameraManager
+from detection.calibration.lens import load_lens_calibration, undistort
+from detection.calibration.board import load_board_calibration, normalize_frame
+from detection.detection.motion import MotionDetector, MotionState
+from detection.detection.corners import detect_dart_location
+from detection.detection.fusion import fuse_detections
+from detection.scoring.board_mapping import DartScore
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR = Path(__file__).parent.parent / "data" / "calibrations"
+
+# Position de chaque caméra autour de la cible
+CAMERA_SIDES = {0: "left", 1: "right", 2: "top"}
+
+# Délai max entre détection d'une caméra et les autres (secondes)
+SYNC_WINDOW = 0.3
+
+# Nombre max de fléchettes par tour
+MAX_DARTS_PER_TURN = 3
+
+
+class DetectionEngine:
+    """
+    Boucle principale de détection.
+    S'exécute dans un thread asyncio séparé.
+    """
+
+    def __init__(self, camera_manager: CameraManager, event_bus):
+        self.cameras = camera_manager
+        self.event_bus = event_bus
+
+        # Un détecteur de mouvement par caméra
+        self._motion: dict[int, MotionDetector] = {
+            idx: MotionDetector() for idx in camera_manager.cameras
+        }
+
+        # Calibrations chargées au démarrage
+        self._lens: dict[int, tuple] = {}
+        self._homographies: dict[int, np.ndarray] = {}
+
+        self._running = False
+        self._darts_this_turn = 0
+        self._last_dart_time = 0.0
+
+    # ------------------------------------------------------------------
+    # Cycle de vie
+    # ------------------------------------------------------------------
+
+    def load_calibrations(self):
+        """Charge toutes les calibrations disponibles depuis le disque."""
+        for idx in self.cameras.cameras:
+            # Distorsion lentille
+            try:
+                K, D = load_lens_calibration(idx, DATA_DIR)
+                self._lens[idx] = (K, D)
+                logger.info(f"Calibration lentille chargée — cam {idx}")
+            except FileNotFoundError:
+                logger.warning(f"Pas de calibration lentille pour cam {idx} — distorsion non corrigée")
+
+            # Homographie board
+            try:
+                cal = load_board_calibration(idx, DATA_DIR)
+                self._homographies[idx] = cal["homography"]
+                logger.info(f"Calibration board chargée — cam {idx}")
+            except FileNotFoundError:
+                logger.warning(f"Pas de calibration board pour cam {idx} — caméra ignorée")
+
+    def reload_calibrations(self):
+        """Recharge les calibrations à chaud (après recalibration depuis l'app)."""
+        self._lens.clear()
+        self._homographies.clear()
+        self.load_calibrations()
+
+    async def run(self):
+        """Boucle principale asynchrone. Appeler avec asyncio.create_task()."""
+        self.load_calibrations()
+        self._running = True
+        logger.info("Moteur de détection démarré")
+
+        # Initialise les références de mouvement
+        await self._init_references()
+
+        while self._running:
+            try:
+                await self._detection_cycle()
+            except Exception as e:
+                logger.error(f"Erreur cycle détection : {e}", exc_info=True)
+            await asyncio.sleep(0.03)   # ~30 Hz
+
+    async def stop(self):
+        self._running = False
+        logger.info("Moteur de détection arrêté")
+
+    # ------------------------------------------------------------------
+    # Cycle de détection
+    # ------------------------------------------------------------------
+
+    async def _init_references(self):
+        """Capture les frames initiales comme référence (board vide)."""
+        await asyncio.sleep(1.0)   # Laisse les caméras se stabiliser
+        frames = self.cameras.read_all()
+        for idx, frame in frames.items():
+            if frame is not None:
+                processed = self._preprocess(frame, idx)
+                self._motion[idx].set_reference(processed)
+        logger.info("Références de mouvement initialisées")
+
+    async def _detection_cycle(self):
+        frames = self.cameras.read_all()
+        motion_results = {}
+
+        for idx, frame in frames.items():
+            if frame is None:
+                continue
+            processed = self._preprocess(frame, idx)
+            result = self._motion[idx].process(processed)
+            motion_results[idx] = (result, processed)
+
+        # Détecte les états
+        stable_cameras = [
+            idx for idx, (r, _) in motion_results.items()
+            if r.state == MotionState.DART_STABLE
+        ]
+        takeout_cameras = [
+            idx for idx, (r, _) in motion_results.items()
+            if r.state == MotionState.TAKEOUT
+        ]
+
+        if takeout_cameras:
+            await self._handle_takeout()
+            return
+
+        if stable_cameras and self._darts_this_turn < MAX_DARTS_PER_TURN:
+            # Attend brièvement que les autres caméras se stabilisent aussi
+            await asyncio.sleep(0.1)
+            frames_stable = self.cameras.read_all()
+            await self._handle_dart(frames_stable, stable_cameras)
+
+    async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
+        """Localise et score la fléchette, broadcast le résultat."""
+        detections = {}
+
+        for idx in self._homographies:
+            frame = frames.get(idx)
+            if frame is None:
+                continue
+
+            processed = self._preprocess(frame, idx)
+            ref = self._motion[idx]._reference
+
+            if ref is None:
+                continue
+
+            # Différence avec la référence
+            gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 0)
+            diff = cv2.absdiff(ref.astype(np.uint8), gray)
+            _, thresh = cv2.threshold(diff, 35, 255, cv2.THRESH_BINARY)
+
+            location = detect_dart_location(thresh, CAMERA_SIDES.get(idx, "left"))
+            detections[idx] = location
+
+        result = fuse_detections(detections, self._homographies)
+
+        if result is None:
+            logger.debug("Fusion : aucune détection exploitable")
+            return
+
+        self._darts_this_turn += 1
+        self._last_dart_time = time.time()
+
+        logger.info(
+            f"Fléchette {self._darts_this_turn}/3 : {result.score.label} "
+            f"({result.score.score}pts) conf={result.confidence:.2f} "
+            f"cams={result.cameras_used} accord={result.agreement}"
+        )
+
+        await self.event_bus.send_dart(
+            score_label=result.score.label,
+            score_value=result.score.score,
+            camera_info={
+                "cameras_used": result.cameras_used,
+                "confidence": round(result.confidence, 3),
+                "agreement": result.agreement,
+                "x": round(result.x_normalized, 1),
+                "y": round(result.y_normalized, 1),
+            },
+        )
+
+        # Met à jour les références avec la fléchette plantée
+        for idx in self._homographies:
+            frame = frames.get(idx)
+            if frame is not None:
+                processed = self._preprocess(frame, idx)
+                self._motion[idx].set_reference(processed)
+
+    async def _handle_takeout(self):
+        """Reset après retrait des fléchettes."""
+        if self._darts_this_turn == 0:
+            return   # Faux positif, ignore
+
+        logger.info(f"Retrait détecté après {self._darts_this_turn} fléchette(s)")
+        self._darts_this_turn = 0
+
+        await self.event_bus.send_takeout()
+
+        # Réinitialise les références sur le board vide
+        await asyncio.sleep(0.5)
+        frames = self.cameras.read_all()
+        for idx, frame in frames.items():
+            if frame is not None:
+                processed = self._preprocess(frame, idx)
+                self._motion[idx].set_reference(processed)
+
+    # ------------------------------------------------------------------
+    # Prétraitement
+    # ------------------------------------------------------------------
+
+    def _preprocess(self, frame: np.ndarray, cam_idx: int) -> np.ndarray:
+        """Corrige la distorsion si calibration disponible."""
+        if cam_idx in self._lens:
+            K, D = self._lens[cam_idx]
+            return undistort(frame, K, D)
+        return frame

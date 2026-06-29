@@ -1,0 +1,29 @@
+name: dartsystem
+description: DartSystem — détection automatique de fléchettes
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^2.4.0      # WebSocket vers le RPi
+  http: ^1.2.0                    # Appels REST API
+  provider: ^6.1.0                # State management
+  shared_preferences: ^2.2.0     # Sauvegarde IP du RPi, client actif
+  cached_network_image: ^3.3.0   # Images caméra
+  google_fonts: ^6.1.0           # Polices personnalisées par client
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/clients/default/
+    - assets/clients/bar_template/
+    - clients/
