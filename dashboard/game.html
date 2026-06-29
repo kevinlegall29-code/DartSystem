@@ -153,17 +153,32 @@ let selMode = '501';
 let selMult = 'S';
 let corrIndex = 0;
 
-// ---- WebSocket ----
+// ---- WebSocket (mises à jour instantanées) ----
 function connect() {
   ws = new WebSocket(`ws://${host}/game/ws`);
   ws.onopen = () => document.getElementById('dot').classList.add('ok');
   ws.onclose = () => { document.getElementById('dot').classList.remove('ok'); setTimeout(connect, 2000); };
-  ws.onerror = () => ws.close();
+  ws.onerror = () => { try { ws.close(); } catch(e){} };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'game_state') render(msg.data);
   };
 }
+
+// ---- Polling (filet de sécurité : marche même si la WebSocket est suspendue
+//      par le navigateur mobile en arrière-plan). ----
+let lastStateJson = '';
+async function poll() {
+  try {
+    const r = await fetch(`${base}/game/state`, { cache: 'no-store' });
+    const s = await r.json();
+    const j = JSON.stringify(s);
+    if (j !== lastStateJson) { lastStateJson = j; render(s); }
+  } catch (e) { /* hors ligne, on réessaie */ }
+}
+setInterval(poll, 1000);
+// Recharge l'état dès que l'onglet redevient visible (réveil téléphone)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
 // ---- Setup ----
 document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
