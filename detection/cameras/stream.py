@@ -9,9 +9,8 @@ logger = logging.getLogger(__name__)
 class CameraStream:
     """Capture asynchrone d'une caméra USB (OV9732)."""
 
-    def __init__(self, device: str | int, width: int = 1280, height: int = 720, fps: int = 30, exposure: int = 156):
-        self.index = device   # chemin /dev/videoX ou indice entier
-        self.device = device
+    def __init__(self, index: int, width: int = 1280, height: int = 720, fps: int = 30, exposure: int = 156):
+        self.index = index
         self.width = width
         self.height = height
         self.fps = fps
@@ -25,9 +24,9 @@ class CameraStream:
 
     # ------------------------------------------------------------------
     def start(self) -> "CameraStream":
-        self._cap = cv2.VideoCapture(self.device)
+        self._cap = cv2.VideoCapture(self.index)
         if not self._cap.isOpened():
-            raise RuntimeError(f"Impossible d'ouvrir la caméra {self.device}")
+            raise RuntimeError(f"Impossible d'ouvrir la caméra {self.index}")
 
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
@@ -81,12 +80,9 @@ class CameraStream:
 class CameraManager:
     """Gère les 3 caméras OV9732."""
 
-    DEVICES = ["/dev/video0", "/dev/video2", "/dev/video4"]
-
-    def __init__(self, devices: list[str] | None = None):
-        devs = devices or self.DEVICES
+    def __init__(self, indices: tuple = (0, 1, 2)):
         self.cameras: dict[int, CameraStream] = {
-            i: CameraStream(device=dev) for i, dev in enumerate(devs)
+            i: CameraStream(index=i) for i in indices
         }
 
     def start_all(self):
