@@ -13,7 +13,7 @@ from api.events import event_bus
 
 router = APIRouter()
 
-camera_manager = CameraManager(indices=(0, 1, 2))
+camera_manager = CameraManager(indices=(0, 2, 4))
 camera_manager.start_all()
 
 

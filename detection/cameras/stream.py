@@ -80,7 +80,7 @@ class CameraStream:
 class CameraManager:
     """Gère les 3 caméras OV9732."""
 
-    def __init__(self, indices: tuple[int, int, int] = (0, 1, 2)):
+    def __init__(self, indices: tuple[int, int, int] = (0, 2, 4)):
         self.cameras: dict[int, CameraStream] = {
             i: CameraStream(index=i) for i in indices
         }
