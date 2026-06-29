@@ -277,13 +277,40 @@ class DetectionEngine:
 
         await self.event_bus.send_takeout()
 
-        # Réinitialise les références sur le board vide
-        await asyncio.sleep(0.5)
+        # Attend que la scène soit RÉELLEMENT stable (bras parti) avant de
+        # capturer la nouvelle référence du board vide.
+        await self._wait_until_stable()
+
         frames = self.cameras.read_all()
         for idx, frame in frames.items():
             if frame is not None:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
+        logger.info("Référence board vide recapturée après stabilisation")
+
+    async def _wait_until_stable(self, needed: int = 6, timeout: float = 6.0):
+        """Attend N frames consécutives sans mouvement (bras hors champ)."""
+        prev = {}
+        stable = 0
+        start = time.time()
+        while time.time() - start < timeout:
+            await asyncio.sleep(0.05)
+            frames = self.cameras.read_all()
+            moving = False
+            for idx, frame in frames.items():
+                if frame is None:
+                    continue
+                gray = cv2.cvtColor(self._preprocess(frame, idx), cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (5, 5), 0)
+                if idx in prev:
+                    diff = cv2.absdiff(prev[idx], gray)
+                    _, th = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                    if cv2.countNonZero(th) > 400:
+                        moving = True
+                prev[idx] = gray
+            stable = stable + 1 if not moving else 0
+            if stable >= needed:
+                return
 
     # ------------------------------------------------------------------
     # Prétraitement
