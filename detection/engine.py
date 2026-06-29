@@ -121,6 +121,9 @@ class DetectionEngine:
         """Boucle principale asynchrone. Appeler avec asyncio.create_task()."""
         print("[ENGINE] Démarrage...", flush=True)
         self.load_calibrations()
+        # Le jeu peut réinitialiser le compteur de tour du moteur
+        from api.game_logic import game
+        game.engine_hook = self.reset_turn
         self._running = True
         print(f"[ENGINE] Caméras : {list(self.cameras.cameras.keys())}", flush=True)
         print(f"[ENGINE] Homographies chargées : {list(self._homographies.keys())}", flush=True)
@@ -450,44 +453,21 @@ class DetectionEngine:
             await self.event_bus.send_game_state(st)
 
     async def _handle_takeout(self):
-        """Candidat retrait : on CONFIRME seulement si le board est vraiment vide."""
+        """Retrait des fléchettes → fin de tour. Modèle simple et robuste."""
         self._motion_since = 0.0
         self._motion_accum = {}
-        self._takeout_time = time.time()
 
         if self._darts_this_turn == 0:
+            self._takeout_time = time.time()
             return   # rien à retirer
 
-        # Attend que le mouvement (bras) se calme
-        await self._wait_until_stable()
-
-        # VALIDATION : le board est-il redevenu VIDE (fléchettes retirées) ?
-        # Comparaison à la référence board-vide. Vide → faible diff ; fléchettes
-        # présentes → gros diff. On log les valeurs pour calibrer EMPTY_THRESH.
-        EMPTY_THRESH = 6000
-        frames = self.cameras.read_all()
-        empty_cams = 0
-        total = 0
-        for idx, frame in frames.items():
-            if frame is None or idx not in self._empty_reference:
-                continue
-            total += 1
-            gray = self._gray(self._preprocess(frame, idx))
-            diff = cv2.absdiff(self._empty_reference[idx], gray)
-            _, th = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
-            nz = cv2.countNonZero(th)
-            print(f"[ENGINE] validation retrait cam{idx}: diff_vs_vide={nz} (seuil {EMPTY_THRESH})", flush=True)
-            if nz < EMPTY_THRESH:
-                empty_cams += 1
-
-        if empty_cams < 2:
-            # Fléchettes toujours présentes → fausse alerte, on N'efface PAS le tour
-            print(f"[ENGINE] Faux retrait ignoré ({empty_cams}/{total} cams vides)", flush=True)
-            logger.info(f"Faux retrait ignoré ({empty_cams}/{total} cams vides)")
+        # Anti-faux-positif : pas de takeout juste après une fléchette (mi-lancer).
+        # Un retrait survient quand le joueur a fini de lancer (≥1s après le dernier dart).
+        if time.time() - self._last_dart_time < 1.0:
             return
 
-        # Retrait CONFIRMÉ
-        logger.info(f"Retrait CONFIRMÉ après {self._darts_this_turn} fléchette(s)")
+        self._takeout_time = time.time()
+        logger.info(f"Retrait après {self._darts_this_turn} fléchette(s)")
         self._darts_this_turn = 0
         await self.event_bus.send_takeout()
 
@@ -497,13 +477,21 @@ class DetectionEngine:
             st = game.end_turn()
             await self.event_bus.send_game_state(st)
 
-        # Recapture les références du board vide
+        # Attend la stabilité puis recapture les références (nouveau board vide)
+        await self._wait_until_stable()
+        frames = self.cameras.read_all()
         for idx, frame in frames.items():
             if frame is not None:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
                 self._empty_reference[idx] = self._gray(processed)
         logger.info("Référence board vide recapturée")
+
+    def reset_turn(self):
+        """Réinitialise le compteur de fléchettes du tour (appelé par le jeu)."""
+        self._darts_this_turn = 0
+        self._motion_since = 0.0
+        self._motion_accum = {}
 
     async def _wait_until_stable(self, needed: int = 6, timeout: float = 6.0):
         """Attend N frames consécutives sans mouvement (bras hors champ)."""

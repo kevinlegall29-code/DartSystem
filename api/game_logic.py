@@ -12,7 +12,15 @@ START_SCORES = {"501": 501, "301": 301, "701": 701}
 
 class GameEngine:
     def __init__(self):
+        self.engine_hook = None   # callback pour réinitialiser le compteur du moteur
         self.reset()
+
+    def _reset_engine_turn(self):
+        if self.engine_hook:
+            try:
+                self.engine_hook()
+            except Exception:
+                pass
 
     def reset(self):
         self.active = False
@@ -41,6 +49,7 @@ class GameEngine:
         self.active = True
         self.winner = None
         self.message = f"Au tour de {players[0]}"
+        self._reset_engine_turn()
         logger.info(f"Partie {mode} démarrée : {players} (double-out={double_out})")
         return self.state()
 
@@ -122,6 +131,7 @@ class GameEngine:
         self.turn_darts = []
         self.turn_start_score = self.players[self.current]["score"]
         self.message = f"Au tour de {self.players[self.current]['name']}"
+        self._reset_engine_turn()
 
     # ------------------------------------------------------------------
 
