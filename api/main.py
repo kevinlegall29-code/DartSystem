@@ -30,6 +30,10 @@ async def lifespan(app: FastAPI):
     # La boucle principale (serveur web) pour les broadcasts thread-safe
     event_bus.set_loop(asyncio.get_running_loop())
 
+    # Démarre le serveur BLE (le Pi expose les events fléchettes en Bluetooth)
+    from api.ble_server import ble_server
+    await ble_server.start()
+
     engine = DetectionEngine(camera_manager, event_bus)
     app.state.engine = engine
 

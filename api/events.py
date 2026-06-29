@@ -63,15 +63,26 @@ class EventBus:
         await self.broadcast("dart_detected", {
             "label": score_label, "score": score_value, "cameras": camera_info,
         })
+        self._ble({"t": "dart", "label": score_label, "value": score_value,
+                   "mult": camera_info.get("multiplier", 1)})
 
     async def send_game_state(self, state: dict):
         await self.broadcast("game_state", state)
 
     async def send_takeout(self):
         await self.broadcast("takeout", {})
+        self._ble({"t": "takeout"})
 
     async def send_camera_status(self, status: dict):
         await self.broadcast("camera_status", status)
+
+    def _ble(self, event: dict):
+        """Notifie aussi en BLE (si dispo)."""
+        try:
+            from api.ble_server import ble_server
+            ble_server.notify(event)
+        except Exception:
+            pass
 
 
 event_bus = EventBus()

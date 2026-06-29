@@ -414,6 +414,7 @@ class DetectionEngine:
                 "cameras_used": result.cameras_used,
                 "confidence": round(result.confidence, 3),
                 "agreement": result.agreement,
+                "multiplier": result.score.multiplier,
                 "x": round(result.x_normalized, 1),
                 "y": round(result.y_normalized, 1),
             },
