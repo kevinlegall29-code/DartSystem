@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DartSystem — Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.green  { background: #1f4a22; color: #3fb950; border: 1px solid #3fb950; }
+    .badge.red    { background: #4a1f1f; color: #f85149; border: 1px solid #f85149; }
+    .badge.yellow { background: #4a3c1f; color: #e3b341; border: 1px solid #e3b341; }
+
+    .connection-bar {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .connection-bar label { font-size: 0.85rem; color: #8b949e; }
+    .connection-bar input {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 6px 12px;
+      font-size: 0.9rem;
+      width: 180px;
+    }
+    .btn {
+      padding: 6px 16px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn.primary { background: #238636; color: #fff; }
+    .btn.danger  { background: #b62324; color: #fff; }
+    .btn.secondary { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 16px;
+      padding: 20px 24px;
+      max-width: 1400px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .card h2 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Caméras */
+    .cameras-card { grid-column: 1 / 3; }
+    .cam-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .cam-item {
+      background: #0d1117;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    .cam-item img, .cam-item .cam-placeholder {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+    }
+    .cam-placeholder {
+      background: #1c2128;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #484f58;
+      font-size: 0.8rem;
+      gap: 6px;
+    }
+    .cam-label {
+      position: absolute;
+      top: 6px; left: 8px;
+      background: rgba(0,0,0,0.7);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .cam-status-dot {
+      position: absolute;
+      top: 8px; right: 8px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #484f58;
+    }
+    .cam-status-dot.ok { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    .cam-calib {
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      display: flex;
+      gap: 6px;
+    }
+
+    /* Calibration */
+    .calib-card { grid-column: 3; grid-row: 1 / 3; }
+    .calib-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 0.85rem;
+    }
+    .calib-row:last-child { border-bottom: none; }
+    .calib-check { display: flex; gap: 10px; }
+    .icon { font-size: 1rem; }
+
+    /* Détection live */
+    .detection-card { grid-column: 1 / 3; }
+    .dart-display {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .dart-slot {
+      flex: 1;
+      background: #0d1117;
+      border: 2px solid #21262d;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      min-height: 100px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+    }
+    .dart-slot.hit {
+      border-color: #388bfd;
+      background: #0d1f38;
+      animation: flash 0.4s ease;
+    }
+    .dart-slot .score-label {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+    .dart-slot .score-pts {
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+    .dart-slot .empty-icon { font-size: 1.5rem; color: #21262d; }
+    @keyframes flash {
+      0%   { background: #1c4070; border-color: #58a6ff; }
+      100% { background: #0d1f38; border-color: #388bfd; }
+    }
+
+    .turn-total {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #f0883e;
+      text-align: center;
+      padding: 12px 0 4px;
+    }
+    .turn-label { font-size: 0.8rem; color: #8b949e; text-align: center; }
+
+    /* Log */
+    .log-card { grid-column: 3; grid-row: 3; }
+    .log-box {
+      background: #0d1117;
+      border-radius: 6px;
+      padding: 10px;
+      height: 220px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.75rem;
+      color: #8b949e;
+    }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #161b22; }
+    .log-entry.dart  { color: #58a6ff; }
+    .log-entry.state { color: #3fb950; }
+    .log-entry.warn  { color: #e3b341; }
+    .log-entry.error { color: #f85149; }
+
+    /* Moteur */
+    .engine-card { grid-column: 1 / 3; }
+    .engine-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .stat-box {
+      background: #0d1117;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #58a6ff; }
+    .stat-label { font-size: 0.72rem; color: #8b949e; margin-top: 2px; }
+
+    /* Panneau jeu manuel */
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .score-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      padding: 6px 4px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      text-align: center;
+    }
+    .score-btn:hover { background: #388bfd; border-color: #388bfd; }
+    .score-btn.double { color: #f0883e; }
+    .score-btn.treble { color: #3fb950; }
+    .score-btn.bull   { color: #f85149; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🎯</span>
+  <h1>DartSystem Dashboard</h1>
+  <span class="badge red" id="ws-badge">Déconnecté</span>
+  <span class="badge yellow" id="engine-badge">Moteur arrêté</span>
+</header>
+
+<div class="connection-bar">
+  <label>IP du Raspberry Pi :</label>
+  <input id="rpi-ip" type="text" value="192.168.50.1" placeholder="192.168.1.x">
+  <button class="btn primary" onclick="connect()">Connecter</button>
+  <button class="btn danger" onclick="disconnect()">Déconnecter</button>
+  <button class="btn secondary" onclick="reloadCalib()">↺ Recharger calibrations</button>
+  <button class="btn secondary" onclick="resetDarts()">Effacer tour</button>
+  <label style="margin-left:16px; color:#8b949e;">Exposition :</label>
+  <input type="range" id="exposure-slider" min="50" max="500" value="156" step="10"
+         style="width:120px; accent-color:#388bfd;"
+         oninput="document.getElementById('exposure-val').textContent=this.value"
+         onchange="setExposure(this.value)">
+  <span id="exposure-val" style="color:#e6edf3; min-width:32px;">156</span>
+</div>
+
+<main>
+
+  <!-- Caméras -->
+  <div class="card cameras-card">
+    <h2>📷 Caméras</h2>
+    <div class="cam-grid" id="cam-grid">
+      <!-- généré par JS -->
+    </div>
+  </div>
+
+  <!-- Détection live -->
+  <div class="card detection-card">
+    <h2>🎯 Détection — Tour en cours</h2>
+    <div class="dart-display">
+      <div class="dart-slot" id="dart-0"><span class="empty-icon">○</span></div>
+      <div class="dart-slot" id="dart-1"><span class="empty-icon">○</span></div>
+      <div class="dart-slot" id="dart-2"><span class="empty-icon">○</span></div>
+    </div>
+    <div class="turn-total" id="turn-total">0</div>
+    <div class="turn-label">points ce tour</div>
+  </div>
+
+  <!-- Calibration -->
+  <div class="card calib-card">
+    <h2>⚙️ Calibration</h2>
+    <div id="calib-status">
+      <!-- généré par JS -->
+    </div>
+    <div style="margin-top: 16px; font-size: 0.8rem; color: #8b949e;">
+      Score qualité minimal recommandé : 80%
+    </div>
+  </div>
+
+  <!-- Statistiques moteur -->
+  <div class="card engine-card">
+    <h2>⚡ Moteur de détection</h2>
+    <div class="engine-stats">
+      <div class="stat-box">
+        <div class="stat-value" id="stat-darts">0</div>
+        <div class="stat-label">Fléchettes détectées</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-agreement">—</div>
+        <div class="stat-label">Accord 3 caméras</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-confidence">—</div>
+        <div class="stat-label">Confiance dernière</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-cams-used">—</div>
+        <div class="stat-label">Caméras utilisées</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Score manuel -->
+  <div class="card" style="grid-column: 1 / 3;">
+    <h2>🖊 Score manuel (test / correction)</h2>
+    <div class="score-grid">
+      <button class="score-btn bull" onclick="manualScore('DBULL')">BULL 50</button>
+      <button class="score-btn bull" onclick="manualScore('BULL')">Bull 25</button>
+      <button class="score-btn" onclick="manualScore('MISS')">MISS</button>
+      <button class="score-btn" onclick="resetDarts()">← Annuler</button>
+      <!-- Singles -->
+      <script>
+        for (let n = 1; n <= 20; n++) {
+          document.write(`<button class="score-btn" onclick="manualScore('S${n}')">S${n}</button>`);
+        }
+        for (let n = 1; n <= 20; n++) {
+          document.write(`<button class="score-btn double" onclick="manualScore('D${n}')">D${n}</button>`);
+        }
+        for (let n = 1; n <= 20; n++) {
+          document.write(`<button class="score-btn treble" onclick="manualScore('T${n}')">T${n}</button>`);
+        }
+      </script>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card log-card">
+    <h2>📋 Log WebSocket</h2>
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+</main>
+
+<script>
+  let ws = null;
+  let dartsThisTurn = [];
+  let totalDarts = 0;
+  let baseUrl = '';
+
+  // ------------------------------------------------------------------
+  // Connexion
+  // ------------------------------------------------------------------
+
+  function connect() {
+    const ip = document.getElementById('rpi-ip').value.trim();
+    baseUrl = `http://${ip}:8080`;
+    const wsUrl = `ws://${ip}:8080`;
+
+    // Test HTTP d'abord
+    fetch(`${baseUrl}/health`)
+      .then(r => r.json())
+      .then(data => {
+        log(`API joignable — version ${data.version}`, 'state');
+        loadCameras(ip);
+        loadCalibStatus();
+        connectWS(wsUrl);
+      })
+      .catch(() => log('Impossible de joindre le RPi — vérifiez IP et Wi-Fi', 'error'));
+  }
+
+  function connectWS(wsUrl) {
+    if (ws) ws.close();
+    ws = new WebSocket(`${wsUrl}/game/ws`);
+
+    ws.onopen = () => {
+      setBadge('ws-badge', 'Connecté', 'green');
+      setBadge('engine-badge', 'Moteur actif', 'green');
+      log('WebSocket connecté', 'state');
+    };
+
+    ws.onmessage = (evt) => {
+      const msg = JSON.parse(evt.data);
+      handleEvent(msg.type, msg.data);
+    };
+
+    ws.onclose = () => {
+      setBadge('ws-badge', 'Déconnecté', 'red');
+      setBadge('engine-badge', 'Moteur arrêté', 'yellow');
+      log('WebSocket fermé — tentative de reconnexion dans 3s...', 'warn');
+      setTimeout(() => connectWS(wsUrl), 3000);
+    };
+
+    ws.onerror = () => log('Erreur WebSocket', 'error');
+  }
+
+  function disconnect() {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    setBadge('ws-badge', 'Déconnecté', 'red');
+    setBadge('engine-badge', 'Moteur arrêté', 'yellow');
+    log('Déconnecté manuellement', 'warn');
+  }
+
+  // ------------------------------------------------------------------
+  // Événements WebSocket
+  // ------------------------------------------------------------------
+
+  function handleEvent(type, data) {
+    if (type === 'dart_detected') {
+      const label = data.label;
+      const score = data.score;
+      const cams  = data.cameras || {};
+
+      dartsThisTurn.push({ label, score });
+      totalDarts++;
+
+      updateDartSlots();
+      updateEngineStats(cams);
+      log(`🎯 ${label} = ${score}pts | conf=${(cams.confidence||0).toFixed(2)} | accord=${cams.agreement} | cams=[${cams.cameras_used||'?'}]`, 'dart');
+    }
+
+    if (type === 'takeout') {
+      dartsThisTurn = [];
+      updateDartSlots();
+      log('↩ Retrait des fléchettes', 'state');
+    }
+
+    if (type === 'game_state') {
+      log(`État jeu : mode=${data.mode||'—'} actif=${data.active}`, 'state');
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Affichage des fléchettes
+  // ------------------------------------------------------------------
+
+  function updateDartSlots() {
+    let total = 0;
+    for (let i = 0; i < 3; i++) {
+      const slot = document.getElementById(`dart-${i}`);
+      const d = dartsThisTurn[i];
+      if (d) {
+        slot.innerHTML = `<div class="score-label">${d.label}</div><div class="score-pts">${d.score} pts</div>`;
+        slot.className = 'dart-slot hit';
+        total += d.score;
+      } else {
+        slot.innerHTML = '<span class="empty-icon">○</span>';
+        slot.className = 'dart-slot';
+      }
+    }
+    document.getElementById('turn-total').textContent = total;
+    document.getElementById('stat-darts').textContent = totalDarts;
+  }
+
+  function updateEngineStats(cams) {
+    document.getElementById('stat-agreement').textContent = cams.agreement ? '✅ Oui' : '⚠️ Non';
+    document.getElementById('stat-confidence').textContent = ((cams.confidence||0)*100).toFixed(0) + '%';
+    document.getElementById('stat-cams-used').textContent = (cams.cameras_used||[]).join(', ') || '—';
+  }
+
+  // ------------------------------------------------------------------
+  // Caméras
+  // ------------------------------------------------------------------
+
+  function loadCameras(ip) {
+    const grid = document.getElementById('cam-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const streamUrl = `http://${ip}:8080/cameras/stream/${i}`;
+      grid.innerHTML += `
+        <div class="cam-item">
+          <img src="${streamUrl}" alt="Cam ${i}"
+               onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+          <div class="cam-placeholder" style="display:none">
+            <span style="font-size:2rem">📷</span>
+            <span>Cam ${i} non disponible</span>
+          </div>
+          <span class="cam-label">Cam ${i+1}</span>
+          <span class="cam-status-dot ok" id="cam-dot-${i}"></span>
+          <div class="cam-calib" id="cam-calib-${i}"></div>
+        </div>`;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Calibration
+  // ------------------------------------------------------------------
+
+  function loadCalibStatus() {
+    fetch(`${baseUrl}/calibration/status`)
+      .then(r => r.json())
+      .then(status => {
+        const container = document.getElementById('calib-status');
+        container.innerHTML = '';
+        for (let i = 0; i < 3; i++) {
+          const s = status[i] || { lens: false, board: false, ready: false };
+          const readyIcon = s.ready ? '✅' : '⚠️';
+          container.innerHTML += `
+            <div class="calib-row">
+              <span>Caméra ${i+1}</span>
+              <div class="calib-check">
+                <span title="Distorsion lentille">${s.lens ? '🟢' : '🔴'} Lentille</span>
+                <span title="Calibration board">${s.board ? '🟢' : '🔴'} Board</span>
+                <span>${readyIcon}</span>
+              </div>
+            </div>`;
+          // Màj pastille sur la vue caméra
+          const calib = document.getElementById(`cam-calib-${i}`);
+          if (calib) calib.innerHTML =
+            `<span>${s.lens ? '🟢' : '🔴'}</span><span>${s.board ? '🟢' : '🔴'}</span>`;
+        }
+        log('Statut calibration rechargé', 'state');
+      })
+      .catch(() => log('Erreur chargement statut calibration', 'error'));
+  }
+
+  function reloadCalib() {
+    fetch(`${baseUrl}/calibration/reload`, { method: 'POST' })
+      .then(() => { loadCalibStatus(); log('Calibrations rechargées', 'state'); })
+      .catch(() => log('Erreur rechargement calibration', 'error'));
+  }
+
+  // ------------------------------------------------------------------
+  // Scores manuels
+  // ------------------------------------------------------------------
+
+  function manualScore(label) {
+    fetch(`${baseUrl}/game/score/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    }).catch(() => log(`Erreur score manuel ${label}`, 'error'));
+  }
+
+  function resetDarts() {
+    fetch(`${baseUrl}/game/takeout`, { method: 'POST' })
+      .catch(() => {});
+    dartsThisTurn = [];
+    updateDartSlots();
+    log('Tour réinitialisé manuellement', 'state');
+  }
+
+  // ------------------------------------------------------------------
+  // Log
+  // ------------------------------------------------------------------
+
+  function log(msg, type = '') {
+    const box = document.getElementById('log-box');
+    const time = new Date().toLocaleTimeString('fr-FR');
+    const div = document.createElement('div');
+    div.className = `log-entry ${type}`;
+    div.textContent = `[${time}] ${msg}`;
+    box.prepend(div);
+    if (box.children.length > 100) box.removeChild(box.lastChild);
+  }
+
+  function setBadge(id, text, color) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = `badge ${color}`;
+  }
+
+  // ------------------------------------------------------------------
+  // Init
+  // ------------------------------------------------------------------
+
+  function setExposure(value) {
+    if (!baseUrl) return;
+    fetch(`${baseUrl}/cameras/exposure/${value}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => log(`Exposition réglée à ${value} — ${JSON.stringify(d.cameras)}`, 'state'))
+      .catch(() => log(`Erreur réglage exposition`, 'error'));
+  }
+
+  // Restaure la dernière IP connue
+  const savedIp = localStorage.getItem('rpi_ip');
+  if (savedIp) document.getElementById('rpi-ip').value = savedIp;
+  document.getElementById('rpi-ip').addEventListener('change', e => {
+    localStorage.setItem('rpi_ip', e.target.value);
+  });
+</script>
+
+</body>
+</html>

@@ -9,11 +9,12 @@ logger = logging.getLogger(__name__)
 class CameraStream:
     """Capture asynchrone d'une caméra USB (OV9732)."""
 
-    def __init__(self, index: int, width: int = 1280, height: int = 720, fps: int = 30):
+    def __init__(self, index: int, width: int = 1280, height: int = 720, fps: int = 30, exposure: int = 156):
         self.index = index
         self.width = width
         self.height = height
         self.fps = fps
+        self.exposure = exposure
 
         self._cap: cv2.VideoCapture | None = None
         self._frame = None
@@ -30,9 +31,10 @@ class CameraStream:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self._cap.set(cv2.CAP_PROP_FPS, self.fps)
-        # Désactive l'auto-exposition pour la stabilité de détection
+        # V4L2 : 1 = manuel, 3 = auto
         self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-        self._cap.set(cv2.CAP_PROP_EXPOSURE, 100)
+        # Exposition fixe identique pour toutes les caméras (ajustable)
+        self._cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure)
 
         ok, frame = self._cap.read()
         if not ok:

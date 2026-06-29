@@ -22,6 +22,21 @@ async def cameras_status():
     return {"cameras": camera_manager.status()}
 
 
+@router.post("/exposure/{value}")
+async def set_exposure(value: int):
+    """Règle l'exposition sur toutes les caméras (valeur V4L2, typiquement 50–500)."""
+    results = {}
+    for idx, cam in camera_manager.cameras.items():
+        if cam._cap and cam._cap.isOpened():
+            cam._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+            ok = cam._cap.set(cv2.CAP_PROP_EXPOSURE, value)
+            cam.exposure = value
+            results[idx] = "ok" if ok else "erreur"
+        else:
+            results[idx] = "non disponible"
+    return {"exposure": value, "cameras": results}
+
+
 @router.get("/snapshot/{camera_index}")
 async def snapshot(camera_index: int):
     """Retourne une frame JPEG en base64 pour la caméra donnée."""
