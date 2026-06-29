@@ -1,6 +1,7 @@
 """
-Bus d'événements WebSocket.
-Permet de broadcaster les scores et états à tous les clients connectés (app Flutter).
+Bus d'événements WebSocket — thread-safe.
+Le moteur de détection tourne dans un thread séparé ; les envois WebSocket
+doivent être planifiés sur la boucle asyncio principale (celle du serveur).
 """
 
 import asyncio
@@ -13,15 +14,20 @@ logger = logging.getLogger(__name__)
 
 
 class EventBus:
-    """Singleton — broadcast vers tous les WebSocket connectés."""
+    """Singleton — broadcast thread-safe vers tous les WebSocket connectés."""
 
     _instance: "EventBus | None" = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._clients: set[WebSocket] = set()
+            cls._instance._clients = set()
+            cls._instance._loop = None
         return cls._instance
+
+    def set_loop(self, loop):
+        """Mémorise la boucle principale (serveur) pour les envois thread-safe."""
+        self._loop = loop
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -33,23 +39,29 @@ class EventBus:
         logger.info(f"Client déconnecté ({len(self._clients)} restants)")
 
     async def broadcast(self, event_type: str, data: Any):
-        """Envoie un événement JSON à tous les clients."""
+        """Planifie l'envoi à tous les clients sur la boucle principale (thread-safe)."""
         message = json.dumps({"type": event_type, "data": data})
-        dead = set()
         for ws in set(self._clients):
-            try:
-                await ws.send_text(message)
-            except Exception as e:
-                logger.debug(f"Broadcast échoué : {e}")
-                dead.add(ws)
-        for ws in dead:
+            self._schedule_send(ws, message)
+
+    def _schedule_send(self, ws: WebSocket, message: str):
+        if self._loop is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._safe_send(ws, message), self._loop)
+        except Exception:
+            pass
+
+    async def _safe_send(self, ws: WebSocket, message: str):
+        try:
+            await ws.send_text(message)
+        except Exception:
             self._clients.discard(ws)
 
+    # Raccourcis
     async def send_dart(self, score_label: str, score_value: int, camera_info: dict):
         await self.broadcast("dart_detected", {
-            "label": score_label,
-            "score": score_value,
-            "cameras": camera_info,
+            "label": score_label, "score": score_value, "cameras": camera_info,
         })
 
     async def send_game_state(self, state: dict):

@@ -179,9 +179,8 @@ class DetectionEngine:
 
     async def _detection_cycle(self):
         frames = self.cameras.read_all()
-        loop = asyncio.get_event_loop()
-        # Traitement OpenCV déporté dans un thread → serveur reste réactif
-        motion_results = await loop.run_in_executor(None, self._process_motion, frames)
+        # Le moteur tourne déjà dans son propre thread → calcul direct
+        motion_results = self._process_motion(frames)
 
         # Détecte les états
         stable_cameras = [
@@ -336,11 +335,8 @@ class DetectionEngine:
         samples = []
         result = None
         detections = processed_frames = thresh_frames = None
-        loop = asyncio.get_event_loop()
         for s in range(N_SAMPLES):
-            # Calcul OpenCV lourd déporté dans un thread → ne bloque pas le serveur
-            frames_now = self.cameras.read_all()
-            r, det, pf, tf = await loop.run_in_executor(None, self._detect_pass, frames_now)
+            r, det, pf, tf = self._detect_pass(self.cameras.read_all())
             if r is not None:
                 samples.append((r.x_normalized, r.y_normalized))
                 result, detections, processed_frames, thresh_frames = r, det, pf, tf

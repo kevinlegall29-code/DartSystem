@@ -24,18 +24,28 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import threading
     from api.routes.cameras import camera_manager
+
+    # La boucle principale (serveur web) pour les broadcasts thread-safe
+    event_bus.set_loop(asyncio.get_running_loop())
 
     engine = DetectionEngine(camera_manager, event_bus)
     app.state.engine = engine
-    task = asyncio.create_task(engine.run())
+
+    # Le moteur de détection tourne dans son PROPRE thread (sa propre boucle
+    # asyncio) → le serveur web n'est jamais bloqué par le calcul OpenCV.
+    def run_engine():
+        asyncio.run(engine.run())
+
+    thread = threading.Thread(target=run_engine, daemon=True, name="detection")
+    thread.start()
 
     print("=== DartSystem démarré ===", flush=True)
-    logger.info("DartSystem API + moteur de détection démarrés")
+    logger.info("DartSystem API + moteur de détection démarrés (thread séparé)")
     yield
 
     await engine.stop()
-    task.cancel()
     camera_manager.stop_all()
     logger.info("DartSystem arrêté proprement")
 
