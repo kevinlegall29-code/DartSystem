@@ -143,6 +143,10 @@ def fuse_detections(
     # les flights (hors plan) divergent. On choisit donc, pour chaque caméra,
     # le bout qui converge avec les autres → redondance robuste.
     AGREE_TOL = 75   # px
+    ON_BOARD = 360   # magnitude max (px) pour qu'un point soit plausible (dans le board)
+
+    def on_board(p):
+        return np.linalg.norm(np.asarray(p) - BOARD_CENTER_NORM) < ON_BOARD
 
     # 2 candidats normalisés par caméra (pointe + flight, ordre incertain)
     cand = {}   # cam_idx -> [pt_norm, pt_norm]
@@ -155,18 +159,22 @@ def fuse_detections(
             s = position_to_score(float(p[0]), float(p[1]))
             logger.info(f"[CAM{cam_idx}] bout{k}=({p[0]:.0f},{p[1]:.0f}) → {s.label}")
 
-    # Pour chaque candidat, cherche le bout le plus proche dans CHAQUE autre caméra.
-    # Le meilleur groupe = celui avec le plus de caméras d'accord, puis le plus serré.
+    # Consensus : on ne considère que les bouts DANS le board (filtre les aberrants).
     best_group = None
-    best_key = (0, 1e9)   # (nb caméras, -écart) → on maximise caméras puis minimise écart
+    best_key = (0, 1e9)
     for ci in cam_indices:
         for pi in cand[ci]:
+            if not on_board(pi):
+                continue
             group = [pi]
             cams_used = [ci]
             for cj in cam_indices:
                 if cj == ci:
                     continue
-                nearest = min(cand[cj], key=lambda q: np.linalg.norm(q - pi))
+                onb = [q for q in cand[cj] if on_board(q)]
+                if not onb:
+                    continue
+                nearest = min(onb, key=lambda q: np.linalg.norm(q - pi))
                 if np.linalg.norm(nearest - pi) < AGREE_TOL:
                     group.append(nearest)
                     cams_used.append(cj)
@@ -178,21 +186,39 @@ def fuse_detections(
                     best_group = (np.mean(group, axis=0), cams_used)
 
     if best_group is not None:
+        # MÉTHODE 1 : consensus inter-caméras (le plus fiable)
         final, used = best_group
-        confidence = 0.9
-        agreement = True
+        confidence, agreement, method = 0.9, True, "consensus"
     else:
-        # Aucun accord : fallback sur le bout fin (pointe) de la plus longue vue
-        best_cam = max(cam_indices, key=lambda c: dict(zip(cam_indices, [l[2] for l in lines]))[c])
-        final = cand[best_cam][0]
-        used = [best_cam]
-        confidence = 0.5
-        agreement = False
+        # MÉTHODE 2 : croisé des lignes (directions fiables même si bouts hors-board)
+        tip = None
+        if len(lines) >= 2:
+            weighted = [(p, d, length ** 2) for (p, d, length) in lines]
+            inter = _intersect_lines(weighted)
+            if inter is not None and on_board(inter):
+                tip = inter
+        if tip is not None:
+            final = np.asarray(tip)
+            used = cam_indices
+            confidence, agreement, method = 0.7, False, "intersection"
+        else:
+            # MÉTHODE 3 : meilleure caméra ayant un bout DANS le board
+            onboard_cams = [
+                c for c in cam_indices if any(on_board(p) for p in cand[c])
+            ]
+            if not onboard_cams:
+                logger.info("FUSION : aucun point plausible dans le board")
+                return None
+            lengths = dict(zip(cam_indices, [l[2] for l in lines]))
+            best_cam = max(onboard_cams, key=lambda c: lengths[c])
+            # bout le plus proche du centre (la pointe est dans le board)
+            final = min(cand[best_cam], key=lambda p: np.linalg.norm(p - BOARD_CENTER_NORM))
+            used = [best_cam]
+            confidence, agreement, method = 0.5, False, "mono-caméra"
 
     x_final, y_final = float(final[0]), float(final[1])
     score = position_to_score(x_final, y_final)
-    logger.info(f"FUSION cams {used} (accord={agreement}) → "
-                f"({x_final:.0f},{y_final:.0f}) = {score.label}")
+    logger.info(f"FUSION [{method}] cams {used} → ({x_final:.0f},{y_final:.0f}) = {score.label}")
 
     return FusedDartResult(
         score=score, x_normalized=x_final, y_normalized=y_final,
