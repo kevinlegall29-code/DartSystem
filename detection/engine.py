@@ -33,7 +33,9 @@ SYNC_WINDOW = 0.3
 MAX_DARTS_PER_TURN = 3
 
 # Nombre de passes de détection moyennées (médiane) pour réduire le jitter
-N_SAMPLES = 4
+N_SAMPLES = 3
+SAMPLE_DELAY = 0.03   # secondes entre passes de moyennage
+POST_DART_COOLDOWN = 0.35   # garde-temps après une fléchette (évite re-détection)
 
 
 def _touches_border(mask: np.ndarray, margin: int = 10, min_px: int = 60) -> bool:
@@ -235,12 +237,11 @@ class DetectionEngine:
             print(f"[ENGINE] DART_STABLE cams={stable_cameras} cooldown={in_cooldown}", flush=True)
 
         # Cooldown court après une fléchette pour éviter de la re-détecter
-        post_dart = (time.time() - self._last_dart_time) < 1.0
+        post_dart = (time.time() - self._last_dart_time) < POST_DART_COOLDOWN
 
         if (stable_cameras and not in_cooldown and not post_dart
                 and self._darts_this_turn < MAX_DARTS_PER_TURN):
-            # Attend brièvement que les autres caméras se stabilisent aussi
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
             frames_stable = self.cameras.read_all()
             await self._handle_dart(frames_stable, stable_cameras)
 
@@ -287,7 +288,7 @@ class DetectionEngine:
                 samples.append((r.x_normalized, r.y_normalized))
                 result, detections, processed_frames, thresh_frames = r, det, pf, tf
             if s < N_SAMPLES - 1:
-                await asyncio.sleep(0.04)
+                await asyncio.sleep(SAMPLE_DELAY)
 
         # Position finale = médiane de la GRAPPE la plus dense (évite de moyenner
         # à travers un flip pointe/flight qui créerait un score fantôme au milieu).
