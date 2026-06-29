@@ -192,10 +192,15 @@ def fuse_detections(
         final, used = best_group
         confidence, agreement, method = 0.9, True, "consensus"
     else:
-        # MÉTHODE 2 : croisé des lignes (directions fiables même si bouts hors-board)
+        # MÉTHODE 2 : croisé des lignes — UNIQUEMENT les caméras qui ont au moins
+        # un bout dans le board (sinon leur ligne est du bruit et fausse le croisé).
         tip = None
-        if len(lines) >= 2:
-            weighted = [(p, d, length ** 2) for (p, d, length) in lines]
+        valid_lines = [
+            ln for ln, c in zip(lines, cam_indices)
+            if any(on_board(p) for p in cand[c])
+        ]
+        if len(valid_lines) >= 2:
+            weighted = [(p, d, length ** 2) for (p, d, length) in valid_lines]
             inter = _intersect_lines(weighted)
             if inter is not None and on_board(inter):
                 tip = inter
