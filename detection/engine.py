@@ -425,32 +425,29 @@ class DetectionEngine:
         # Attend que le mouvement (bras) se calme
         await self._wait_until_stable()
 
-        # VALIDATION : les fléchettes ont-elles vraiment été RETIRÉES ?
-        # On compare à la référence de travail (qui contient les fléchettes plantées).
-        # Retrait → le board a beaucoup CHANGÉ (fléchettes parties = gros diff).
-        # Fausse alerte (bras) → fléchettes toujours là = board ~identique = petit diff.
+        # VALIDATION : le board est-il redevenu VIDE (fléchettes retirées) ?
+        # Comparaison à la référence board-vide. Vide → faible diff ; fléchettes
+        # présentes → gros diff. On log les valeurs pour calibrer EMPTY_THRESH.
+        EMPTY_THRESH = 6000
         frames = self.cameras.read_all()
-        changed_cams = 0
+        empty_cams = 0
         total = 0
         for idx, frame in frames.items():
-            if frame is None:
-                continue
-            ref = self._motion[idx]._reference
-            if ref is None:
+            if frame is None or idx not in self._empty_reference:
                 continue
             total += 1
             gray = self._gray(self._preprocess(frame, idx))
-            diff = cv2.absdiff(ref.astype(np.uint8), gray)
+            diff = cv2.absdiff(self._empty_reference[idx], gray)
             _, th = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
             nz = cv2.countNonZero(th)
-            print(f"[ENGINE] validation retrait cam{idx}: diff={nz}", flush=True)
-            if nz > 1500:   # le board a changé (fléchettes retirées)
-                changed_cams += 1
+            print(f"[ENGINE] validation retrait cam{idx}: diff_vs_vide={nz} (seuil {EMPTY_THRESH})", flush=True)
+            if nz < EMPTY_THRESH:
+                empty_cams += 1
 
-        if changed_cams < 2:
+        if empty_cams < 2:
             # Fléchettes toujours présentes → fausse alerte, on N'efface PAS le tour
-            print(f"[ENGINE] Faux retrait ignoré ({changed_cams}/{total} cams ont changé)", flush=True)
-            logger.info(f"Faux retrait ignoré ({changed_cams}/{total})")
+            print(f"[ENGINE] Faux retrait ignoré ({empty_cams}/{total} cams vides)", flush=True)
+            logger.info(f"Faux retrait ignoré ({empty_cams}/{total} cams vides)")
             return
 
         # Retrait CONFIRMÉ
