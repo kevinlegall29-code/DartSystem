@@ -32,6 +32,9 @@ SYNC_WINDOW = 0.3
 # Nombre max de fléchettes par tour
 MAX_DARTS_PER_TURN = 3
 
+# Nombre de passes de détection moyennées (médiane) pour réduire le jitter
+N_SAMPLES = 4
+
 
 class DetectionEngine:
     """
@@ -217,41 +220,66 @@ class DetectionEngine:
             frames_stable = self.cameras.read_all()
             await self._handle_dart(frames_stable, stable_cameras)
 
-    async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
-        """Localise et score la fléchette, broadcast le résultat."""
-        self._motion_since = 0.0
-        from detection import debug_viz
-        from detection.detection.fusion import find_tip_normalized
-
+    def _detect_pass(self, frames: dict):
+        """Une passe de détection : retourne (result, detections, processed, thresh)."""
         detections = {}
         processed_frames = {}
         thresh_frames = {}
 
         for idx in self._homographies:
-
             frame = frames.get(idx)
             if frame is None:
                 continue
-
             processed = self._preprocess(frame, idx)
             ref = self._motion[idx]._reference
-
             if ref is None:
                 continue
-
-            # Différence avec la référence
             gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
             diff = cv2.absdiff(ref.astype(np.uint8), gray)
-            # Seuil bas pour capter aussi le fût sombre qui se fond dans le board noir
             _, thresh = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
 
-            location = detect_dart_location(thresh)
-            detections[idx] = location
+            detections[idx] = detect_dart_location(thresh)
             processed_frames[idx] = processed
             thresh_frames[idx] = thresh
 
         result = fuse_detections(detections, self._homographies)
+        return result, detections, processed_frames, thresh_frames
+
+    async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
+        """Localise (moyennage temporel) et score la fléchette, broadcast le résultat."""
+        self._motion_since = 0.0
+        from detection import debug_viz
+        from detection.scoring.board_mapping import position_to_score
+
+        # MOYENNAGE TEMPOREL : plusieurs passes, on prend la médiane des positions
+        # → réduit le jitter d'une frame qui fait basculer les cas-fils.
+        samples = []
+        result = None
+        detections = processed_frames = thresh_frames = None
+        for s in range(N_SAMPLES):
+            r, det, pf, tf = self._detect_pass(self.cameras.read_all())
+            if r is not None:
+                samples.append((r.x_normalized, r.y_normalized))
+                result, detections, processed_frames, thresh_frames = r, det, pf, tf
+            if s < N_SAMPLES - 1:
+                await asyncio.sleep(0.04)
+
+        # Position finale = médiane des échantillons valides
+        if samples:
+            pts = np.array(samples)
+            med = np.median(pts, axis=0)
+            med_score = position_to_score(float(med[0]), float(med[1]))
+            if result is not None:
+                result.x_normalized = float(med[0])
+                result.y_normalized = float(med[1])
+                result.score = med_score
+                if len(samples) >= 2:
+                    logger.info(f"MÉDIANE {len(samples)} passes → "
+                                f"({med[0]:.0f},{med[1]:.0f}) = {med_score.label}")
+
+        if detections is None:
+            return
 
         # --- DEBUG : sauvegarde les images annotées avec le consensus final ---
         consensus = (result.x_normalized, result.y_normalized) if result else None
