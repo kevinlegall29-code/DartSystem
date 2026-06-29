@@ -176,7 +176,7 @@ async function poll() {
     if (j !== lastStateJson) { lastStateJson = j; render(s); }
   } catch (e) { /* hors ligne, on réessaie */ }
 }
-setInterval(poll, 1000);
+setInterval(poll, 600);
 // Recharge l'état dès que l'onglet redevient visible (réveil téléphone)
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
