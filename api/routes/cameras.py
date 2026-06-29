@@ -40,14 +40,18 @@ async def cameras_status():
 
 @router.get("/debug/{name}")
 async def debug_image(name: str):
-    """Sert les images de debug (cam0_detect.jpg, cam0_norm.jpg, etc.)."""
-    from fastapi.responses import FileResponse, Response
+    """Sert les images de debug (lues en mémoire pour éviter les races d'écriture)."""
+    from fastapi.responses import Response
     from pathlib import Path
     path = Path(__file__).parent.parent.parent / "data" / "debug" / name
-    if not path.exists() or ".." in name:
+    if ".." in name or not path.exists():
         return Response(status_code=404)
-    return FileResponse(str(path), media_type="image/jpeg",
-                        headers={"Cache-Control": "no-store"})
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return Response(status_code=404)
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 @router.post("/exposure/{value}")

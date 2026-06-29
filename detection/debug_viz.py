@@ -11,6 +11,13 @@ from pathlib import Path
 DEBUG_DIR = Path(__file__).parent.parent / "data" / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _atomic_imwrite(path: Path, img):
+    """Écrit l'image dans un fichier temporaire puis le renomme (évite lectures partielles)."""
+    tmp = path.with_suffix(".tmp.jpg")
+    cv2.imwrite(str(tmp), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    tmp.replace(path)
+
 # Rayons des anneaux dans l'espace normalisé (pour overlay scoring)
 RING_RADII = [14, 32, 194, 214, 320, 340]
 
@@ -57,8 +64,7 @@ def save_camera_detection(
         cv2.putText(img, "TIP", (int(tip_camera_space[0]) + 15, int(tip_camera_space[1])),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-    cv2.imwrite(str(DEBUG_DIR / f"cam{cam_idx}_detect.jpg"), img,
-                [cv2.IMWRITE_JPEG_QUALITY, 80])
+    _atomic_imwrite(DEBUG_DIR / f"cam{cam_idx}_detect.jpg", img)
 
 
 def save_normalized_view(
@@ -109,5 +115,4 @@ def save_normalized_view(
         cx, cy = int(consensus[0]), int(consensus[1])
         cv2.drawMarker(warped, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
 
-    cv2.imwrite(str(DEBUG_DIR / f"cam{cam_idx}_norm.jpg"), warped,
-                [cv2.IMWRITE_JPEG_QUALITY, 80])
+    _atomic_imwrite(DEBUG_DIR / f"cam{cam_idx}_norm.jpg", warped)
