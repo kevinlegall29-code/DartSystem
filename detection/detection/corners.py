@@ -1,7 +1,7 @@
 """
-Localisation de la fléchette par Harris corner detection sur la diff d'image.
-Retourne les corners filtrés en espace caméra — la pointe est déterminée
-APRÈS transformation homographique dans l'espace normalisé.
+Localisation de la fléchette par analyse de contour sur la diff d'image.
+Approche : contour principal → rectangle orienté minimum → deux extrémités.
+Plus robuste que Harris corners car travaille sur la silhouette complète.
 """
 
 import cv2
@@ -11,16 +11,17 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-MAX_CLUSTER_SPREAD = 180
-MAX_LINE_DISTANCE  = 40
+MIN_DART_AREA = 200      # Surface minimum du contour (pixels²)
+MAX_DART_AREA = 50000    # Surface maximum
+MIN_ASPECT_RATIO = 1.5  # La fléchette est allongée (longueur / largeur > 1.5)
 
 
 @dataclass
 class DartLocation:
-    """Ensemble de corners filtrés en espace caméra."""
-    corners: np.ndarray  # Nx2, coordonnées pixels caméra
+    """Deux extrémités de la fléchette en espace caméra."""
+    corners: np.ndarray  # Shape (2, 2) — les deux bouts de la fléchette
     confidence: float
-    corners_count: int
+    corners_count: int   # Nombre de pixels du contour
 
     @property
     def x(self) -> float:
@@ -33,76 +34,61 @@ class DartLocation:
 
 def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartLocation | None:
     """
-    Localise la fléchette dans une image de différence.
-
-    diff_frame   : image binaire (résultat de absdiff + threshold)
-    camera_side  : "left" | "right" | "top" selon la position de la caméra
-    Retourne DartLocation ou None si non détecté.
+    Détecte la fléchette dans l'image de différence.
+    Retourne les deux extrémités de la fléchette (pointe et fût).
     """
-    corners = _get_harris_corners(diff_frame)
-    if corners is None or len(corners) < 5:
+    # Améliore le contraste de la diff
+    kernel = np.ones((3, 3), np.uint8)
+    dilated = cv2.dilate(diff_frame, kernel, iterations=2)
+    closed  = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return None
 
-    corners = _filter_outliers(corners)
-    if corners is None or len(corners) < 3:
+    # Garde les contours de taille plausible pour une fléchette
+    valid = [
+        c for c in contours
+        if MIN_DART_AREA < cv2.contourArea(c) < MAX_DART_AREA
+    ]
+    if not valid:
         return None
 
-    corners = _filter_by_line(corners, diff_frame.shape)
-    if corners is None or len(corners) < 2:
-        return None
+    # Fusionne tous les contours valides (la fléchette peut apparaître en plusieurs morceaux)
+    all_pts = np.vstack(valid)
 
-    confidence = min(1.0, len(corners) / 50.0)
-    return DartLocation(corners=corners.reshape(-1, 2).astype(float),
-                        confidence=confidence, corners_count=len(corners))
+    # Rectangle orienté minimum autour de la fléchette
+    rect = cv2.minAreaRect(all_pts)
+    box  = cv2.boxPoints(rect)   # 4 coins du rectangle
 
+    (cx, cy), (w, h), angle = rect
+    long_side  = max(w, h)
+    short_side = min(w, h)
 
-def _get_harris_corners(diff_frame: np.ndarray) -> np.ndarray | None:
-    corners = cv2.goodFeaturesToTrack(
-        diff_frame,
-        maxCorners=640,
-        qualityLevel=0.0008,
-        minDistance=1,
-        blockSize=3,
-        useHarrisDetector=True,
-        k=0.06,
-    )
-    return corners
+    if short_side < 1 or long_side / short_side < MIN_ASPECT_RATIO:
+        # Pas assez allongé → probablement pas une fléchette
+        # On utilise quand même le centroïde comme fallback
+        M = cv2.moments(all_pts)
+        if M["m00"] == 0:
+            return None
+        cx_pt = M["m10"] / M["m00"]
+        cy_pt = M["m01"] / M["m00"]
+        pts = np.array([[cx_pt, cy_pt], [cx_pt, cy_pt]], dtype=float)
+        return DartLocation(corners=pts, confidence=0.3, corners_count=len(all_pts))
 
+    # Les deux extrémités du grand axe du rectangle orienté
+    # box[0], box[1], box[2], box[3] = coins dans le sens horaire
+    # Les extrémités du grand axe sont les paires de coins adjacents les plus éloignés
+    if w >= h:
+        # Le grand axe est horizontal dans le rectangle
+        end1 = ((box[0] + box[3]) / 2)
+        end2 = ((box[1] + box[2]) / 2)
+    else:
+        end1 = ((box[0] + box[1]) / 2)
+        end2 = ((box[2] + box[3]) / 2)
 
-def _filter_outliers(corners: np.ndarray) -> np.ndarray | None:
-    pts = corners.reshape(-1, 2)
-    mean = pts.mean(axis=0)
-    mask = (np.abs(pts[:, 0] - mean[0]) < MAX_CLUSTER_SPREAD) & \
-           (np.abs(pts[:, 1] - mean[1]) < MAX_CLUSTER_SPREAD * 0.67)
-    filtered = pts[mask]
-    return filtered if len(filtered) > 0 else None
+    pts = np.array([end1, end2], dtype=float)
+    area = cv2.contourArea(all_pts)
+    confidence = min(1.0, area / 5000.0)
 
-
-def _filter_by_line(corners: np.ndarray, shape: tuple) -> np.ndarray | None:
-    if len(corners) < 2:
-        return corners
-
-    pts = corners.reshape(-1, 1, 2).astype(np.float32)
-    line = cv2.fitLine(pts, cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
-    vx, vy, x0, y0 = float(line[0]), float(line[1]), float(line[2]), float(line[3])
-
-    h, w = shape[:2]
-    p1 = np.array([0.0, y0 + (-x0) * (vy / vx) if vx != 0 else y0])
-    p2 = np.array([float(w), y0 + (w - x0) * (vy / vx) if vx != 0 else y0])
-
-    def point_to_line_dist(p):
-        ap = p - p1
-        ab = p2 - p1
-        t = np.dot(ap, ab) / (np.dot(ab, ab) + 1e-9)
-        t = np.clip(t, 0, 1)
-        proj = p1 + t * ab
-        return np.linalg.norm(p - proj)
-
-    pts_2d = corners.reshape(-1, 2).astype(float)
-    mask = np.array([point_to_line_dist(p) < MAX_LINE_DISTANCE for p in pts_2d])
-    filtered = pts_2d[mask]
-    return filtered if len(filtered) > 0 else None
-
-
-
-
+    return DartLocation(corners=pts, confidence=confidence, corners_count=int(area))
