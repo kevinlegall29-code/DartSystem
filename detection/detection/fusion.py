@@ -70,9 +70,9 @@ def find_tip_normalized(location: DartLocation, homography: np.ndarray) -> tuple
 def _dart_line_normalized(location: DartLocation, homography: np.ndarray):
     """
     Transforme la ligne de la fléchette en espace normalisé.
-    Retourne (point, direction_unitaire) ou None.
-    La ligne passe par la pointe (sur le plan) même si les endpoints captés
-    sont sur le flight — c'est la DIRECTION qui compte pour l'intersection.
+    Retourne (point, direction_unitaire, longueur) ou None.
+    La longueur en espace normalisé = fiabilité : une fléchette vue de profil
+    donne une ligne longue (fiable), vue de bout un blob court (peu fiable).
     """
     corners = location.corners.reshape(-1, 2).astype(np.float32)
     if len(corners) < 2:
@@ -84,21 +84,21 @@ def _dart_line_normalized(location: DartLocation, homography: np.ndarray):
     norm = np.linalg.norm(d)
     if norm < 1e-6:
         return None
-    return p1, d / norm
+    return p1, d / norm, float(norm)
 
 
 def _intersect_lines(lines: list) -> np.ndarray | None:
     """
-    Point minimisant la distance perpendiculaire à toutes les lignes (moindres carrés).
-    lines : liste de (point, direction_unitaire).
-    Toutes les lignes-fléchettes convergent vers la pointe physique.
+    Point minimisant la distance perpendiculaire pondérée aux lignes.
+    lines : liste de (point, direction_unitaire, poids).
+    Le poids (longueur de ligne) fait dominer les caméras voyant la fléchette de profil.
     """
     if len(lines) < 2:
         return None
     A = np.zeros((2, 2))
     b = np.zeros(2)
-    for p, d in lines:
-        M = np.eye(2) - np.outer(d, d)   # projecteur perpendiculaire à la ligne
+    for p, d, w in lines:
+        M = (np.eye(2) - np.outer(d, d)) * w   # projecteur perpendiculaire pondéré
         A += M
         b += M @ p
     try:
@@ -135,11 +135,8 @@ def fuse_detections(
         lines.append(line)
         cam_indices.append(cam_idx)
         confs.append(loc.confidence)
-        # Debug : score de la pointe "naïve" par caméra
-        tip = find_tip_normalized(loc, homographies[cam_idx])
-        if tip:
-            s = position_to_score(*tip)
-            logger.info(f"[CAM{cam_idx}] tip_naif=({tip[0]:.0f},{tip[1]:.0f}) → {s.label}")
+        # Debug : longueur de ligne (fiabilité) par caméra
+        logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
     if not lines:
         return None
