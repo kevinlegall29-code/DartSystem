@@ -250,8 +250,12 @@ def fuse_detections(
                 return None
             lengths = dict(zip(cam_indices, [l[2] for l in lines]))
             best_cam = max(onboard_cams, key=lambda c: lengths[c])
-            # bout le plus proche du centre (la pointe est dans le board)
-            final = min(cand[best_cam], key=lambda p: np.linalg.norm(p - BOARD_CENTER_NORM))
+            # Pointe = corners[0] (vote densité/centroïde de corners.py).
+            # Si ce bout est hors-board (garbage), on prend l'autre s'il est on-board.
+            tip_cand = cand[best_cam][0]
+            if not on_board(tip_cand) and on_board(cand[best_cam][1]):
+                tip_cand = cand[best_cam][1]
+            final = tip_cand
             used = [best_cam]
             confidence, agreement, method = 0.5, False, "mono-caméra"
 
