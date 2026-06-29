@@ -81,6 +81,7 @@ class DetectionEngine:
         self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
         self._motion_since = 0.0   # début du dernier mouvement non résolu (bounce-out)
         self._motion_was_arm = False  # le mouvement a-t-il touché le bord (bras) ?
+        self._motion_accum: dict[int, np.ndarray] = {}  # masque mouvement accumulé par cam
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -185,11 +186,17 @@ class DetectionEngine:
             if self._motion_since == 0.0:
                 self._motion_since = now
                 self._motion_was_arm = False
-            # Détecte si le mouvement touche le bord sur une caméra = bras/corps
+                self._motion_accum = {}
+            # Détecte bord (bras) ET accumule la zone de mouvement (nouvelle fléchette)
             for idx, (r, _) in motion_results.items():
                 if r.state == MotionState.MOTION and r.motion_mask is not None:
                     if _touches_border(r.motion_mask):
                         self._motion_was_arm = True
+                    if idx in self._motion_accum:
+                        self._motion_accum[idx] = cv2.bitwise_or(
+                            self._motion_accum[idx], r.motion_mask)
+                    else:
+                        self._motion_accum[idx] = r.motion_mask.copy()
         else:
             if self._motion_since > 0.0:
                 elapsed = now - self._motion_since
@@ -202,10 +209,12 @@ class DetectionEngine:
                     if self._darts_this_turn < MAX_DARTS_PER_TURN and \
                        (now - self._takeout_time) > self._takeout_cooldown:
                         self._motion_since = 0.0
+                        self._motion_accum = {}
                         await self._handle_bounceout()
                         return
                 self._motion_since = 0.0
                 self._motion_was_arm = False
+                self._motion_accum = {}
 
         # Log état toutes les ~5 secondes pour debug
         if not hasattr(self, '_debug_tick'):
@@ -264,6 +273,17 @@ class DetectionEngine:
             diff = cv2.absdiff(ref.astype(np.uint8), gray)
             _, thresh = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
 
+            # ISOLATION : restreint à la zone de mouvement (la nouvelle fléchette).
+            # Ignore les fléchettes statiques déjà plantées (pas de mouvement récent).
+            accum = self._motion_accum.get(idx)
+            if accum is not None and cv2.countNonZero(accum) > 30:
+                # Dilate largement la zone de mouvement (le vol + la position finale)
+                zone = cv2.dilate(accum, np.ones((45, 45), np.uint8), iterations=1)
+                masked = cv2.bitwise_and(thresh, zone)
+                # N'utilise le masquage que s'il reste assez de pixels (sinon fallback)
+                if cv2.countNonZero(masked) > 60:
+                    thresh = masked
+
             detections[idx] = detect_dart_location(thresh)
             processed_frames[idx] = processed
             thresh_frames[idx] = thresh
@@ -273,7 +293,6 @@ class DetectionEngine:
 
     async def _handle_dart(self, frames: dict, trigger_cameras: list[int]):
         """Localise (moyennage temporel) et score la fléchette, broadcast le résultat."""
-        self._motion_since = 0.0
         from detection import debug_viz
         from detection.scoring.board_mapping import position_to_score
 
@@ -289,6 +308,10 @@ class DetectionEngine:
                 result, detections, processed_frames, thresh_frames = r, det, pf, tf
             if s < N_SAMPLES - 1:
                 await asyncio.sleep(SAMPLE_DELAY)
+
+        # Nettoie le suivi de mouvement (la fléchette est traitée)
+        self._motion_since = 0.0
+        self._motion_accum = {}
 
         # Position finale = médiane de la GRAPPE la plus dense (évite de moyenner
         # à travers un flip pointe/flight qui créerait un score fantôme au milieu).
@@ -383,6 +406,7 @@ class DetectionEngine:
     async def _handle_takeout(self):
         """Reset après retrait des fléchettes."""
         self._motion_since = 0.0
+        self._motion_accum = {}
         self._takeout_time = time.time()   # Démarre le cooldown
 
         if self._darts_this_turn == 0:
