@@ -96,6 +96,16 @@ async def game_ws(ws: WebSocket):
         event_bus.disconnect(ws)
 
 
+@router.post("/angle/{value}")
+async def set_reference_angle(value: float):
+    """Ajuste l'angle de référence du 20 (défaut 81.0). Teste par pas de 9° (= 1 secteur)."""
+    import detection.scoring.board_mapping as bm
+    bm.REFERENCE_ANGLE_DEG = value
+    log_msg = f"Angle référence board : {value}°"
+    logger.info(log_msg)
+    return {"reference_angle": value}
+
+
 def _starting_score(mode: str) -> int:
     return {"501": 501, "301": 301, "cricket": 0}.get(mode, 501)
 

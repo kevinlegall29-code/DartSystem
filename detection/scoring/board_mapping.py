@@ -7,7 +7,7 @@ import math
 from dataclasses import dataclass
 
 CENTER = (400.0, 400.0)
-REFERENCE_ANGLE_DEG = 81.0   # Rotation pour aligner le 20 à 12h
+REFERENCE_ANGLE_DEG = 81.0   # Rotation pour aligner le 20 à 12h — ajustable via API
 
 # Rayons en pixels dans l'espace normalisé 800×800
 RING_RADII = [

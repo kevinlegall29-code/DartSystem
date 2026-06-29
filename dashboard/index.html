@@ -291,6 +291,12 @@
          oninput="document.getElementById('exposure-val').textContent=this.value"
          onchange="setExposure(this.value)">
   <span id="exposure-val" style="color:#e6edf3; min-width:32px;">156</span>
+  <label style="margin-left:16px; color:#8b949e;">Angle 20 :</label>
+  <input type="range" id="angle-slider" min="0" max="360" value="81" step="9"
+         style="width:100px; accent-color:#f0883e;"
+         oninput="document.getElementById('angle-val').textContent=this.value"
+         onchange="setAngle(this.value)">
+  <span id="angle-val" style="color:#f0883e; min-width:32px;">81</span>°
 </div>
 
 <main>
@@ -601,6 +607,14 @@
   // ------------------------------------------------------------------
   // Init
   // ------------------------------------------------------------------
+
+  function setAngle(value) {
+    if (!baseUrl) return;
+    fetch(`${baseUrl}/game/angle/${value}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => log(`Angle référence 20 : ${d.reference_angle}°`, 'state'))
+      .catch(() => log('Erreur réglage angle', 'error'));
+  }
 
   function setExposure(value) {
     if (!baseUrl) return;
