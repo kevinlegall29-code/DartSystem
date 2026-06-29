@@ -191,7 +191,7 @@ class _GameView extends StatelessWidget {
                   Text("${p.score}", style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800,
                     color: active ? theme.colorScheme.secondary : theme.colorScheme.primary)),
                 ]));
-            }).toList()))),
+            }).toList())),
 
       // Message
       Padding(padding: const EdgeInsets.symmetric(vertical: 8),
