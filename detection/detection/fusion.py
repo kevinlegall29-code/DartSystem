@@ -138,14 +138,16 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    # Pointe par caméra + longueur de ligne (fiabilité de la vue)
+    # Pointe par caméra : corners[0] = pointe (bout fin), identifiée par l'épaisseur.
     tips = {}        # cam_idx -> (point_norm, longueur)
     for cam_idx, (p, d, length) in zip(cam_indices, lines):
-        tip = find_tip_normalized(detections[cam_idx], homographies[cam_idx])
-        if tip is not None:
-            tips[cam_idx] = (np.array(tip), length)
-            s = position_to_score(*tip)
-            logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) L={length:.0f} → {s.label}")
+        loc = detections[cam_idx]
+        tip_cam = loc.corners[0].reshape(1, 1, 2).astype(np.float32)
+        tip_norm = cv2.perspectiveTransform(tip_cam, homographies[cam_idx])[0][0]
+        tip = (float(tip_norm[0]), float(tip_norm[1]))
+        tips[cam_idx] = (np.array(tip), length)
+        s = position_to_score(*tip)
+        logger.info(f"[CAM{cam_idx}] pointe=({tip[0]:.0f},{tip[1]:.0f}) L={length:.0f} → {s.label}")
 
     if not tips:
         return None

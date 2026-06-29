@@ -218,15 +218,14 @@ class DetectionEngine:
             try:
                 loc = detections.get(idx)
                 endpoints = loc.corners if loc else None
-                tip_norm = find_tip_normalized(loc, self._homographies[idx]) if loc else None
+                tip_norm = None
                 tip_cam = None
                 if loc and endpoints is not None and len(endpoints) >= 2:
-                    H_inv = np.linalg.inv(self._homographies[idx])
-                    center_cam = cv2.perspectiveTransform(
-                        np.array([[[400.0, 400.0]]], dtype=np.float32), H_inv)[0][0]
-                    ends = endpoints.reshape(-1, 2)
-                    dists = np.linalg.norm(ends - center_cam, axis=1)
-                    tip_cam = ends[int(np.argmin(dists))]
+                    tip_cam = endpoints[0]   # corners[0] = pointe (bout fin)
+                    tn = cv2.perspectiveTransform(
+                        tip_cam.reshape(1, 1, 2).astype(np.float32),
+                        self._homographies[idx])[0][0]
+                    tip_norm = (float(tn[0]), float(tn[1]))
                 debug_viz.save_camera_detection(idx, processed_frames[idx], thresh_frames[idx], endpoints, tip_cam)
                 debug_viz.save_normalized_view(
                     idx, processed_frames[idx], self._homographies[idx],
