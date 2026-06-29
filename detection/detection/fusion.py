@@ -118,17 +118,30 @@ def fuse_detections(
     ys = np.array([p[1] for p in positions])
 
     if agreement:
-        # Accord : moyenne pondérée par la confiance
         weights = np.array(confs) / np.sum(confs)
         x_final = float(np.dot(weights, xs))
         y_final = float(np.dot(weights, ys))
         global_conf = float(np.mean(confs))
     else:
-        # Désaccord : médiane (plus robuste aux caméras mal calibrées)
-        x_final = float(np.median(xs))
-        y_final = float(np.median(ys))
-        global_conf = float(np.mean(confs)) * 0.7
-        logger.warning(f"Désaccord caméras {cam_indices} — médiane ({x_final:.0f},{y_final:.0f})")
+        # Désaccord : cherche une majorité 2/3 par secteur
+        from detection.scoring.board_mapping import position_to_score
+        from collections import Counter
+        labels = [position_to_score(p[0], p[1]).label for p in positions]
+        most_common, count = Counter(labels).most_common(1)[0]
+
+        if count >= 2:
+            # 2 caméras d'accord → utilise leur moyenne
+            agree_idx = [i for i, l in enumerate(labels) if l == most_common]
+            x_final = float(np.mean([positions[i][0] for i in agree_idx]))
+            y_final = float(np.mean([positions[i][1] for i in agree_idx]))
+            global_conf = float(np.mean([confs[i] for i in agree_idx]))
+            logger.info(f"Majorité 2/3 : {most_common} (cams {[cam_indices[i] for i in agree_idx]})")
+        else:
+            # Aucune majorité → médiane
+            x_final = float(np.median(xs))
+            y_final = float(np.median(ys))
+            global_conf = float(np.mean(confs)) * 0.6
+            logger.warning(f"Désaccord total — médiane ({x_final:.0f},{y_final:.0f})")
 
     score = position_to_score(x_final, y_final)
     return FusedDartResult(
