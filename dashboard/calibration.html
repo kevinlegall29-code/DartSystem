@@ -234,12 +234,34 @@ const POINT_DEFS = [
 
 const ZOOM = 3;
 const MAG_R = 75;   // rayon loupe px
+const IMG_W = 1280, IMG_H = 720;
 
 let currentCam = 0;
-let points = [{}, {}, {}];      // points[camIdx][key] = {x, y, px, py}
+let points = [{}, {}, {}];
 let calibrated = [false, false, false];
 let baseUrl = '';
-let imgW = 1280, imgH = 720;
+
+// Calcule les vraies dimensions affichées de l'image (object-fit: contain)
+function getImageLayout() {
+  const panel  = document.getElementById('cam-panel');
+  const panelW = panel.offsetWidth;
+  const panelH = panel.offsetHeight;
+  const imgAspect   = IMG_W / IMG_H;
+  const panelAspect = panelW / panelH;
+  let dispW, dispH, offX, offY;
+  if (imgAspect > panelAspect) {
+    dispW = panelW;
+    dispH = panelW / imgAspect;
+    offX  = 0;
+    offY  = (panelH - dispH) / 2;
+  } else {
+    dispH = panelH;
+    dispW = panelH * imgAspect;
+    offX  = (panelW - dispW) / 2;
+    offY  = 0;
+  }
+  return { dispW, dispH, offX, offY };
+}
 
 // ------------------------------------------------------------------
 // Init
@@ -294,32 +316,21 @@ function switchCamera(idx) {
 function placePoint(e) {
   const panel = document.getElementById('cam-panel');
   const rect  = panel.getBoundingClientRect();
-  const stream = document.getElementById('cam-stream');
-
-  // Dimensions réelles de l'image affichée (object-fit: contain)
-  const dispW = stream.offsetWidth;
-  const dispH = stream.offsetHeight;
-  const scaleX = imgW / dispW;
-  const scaleY = imgH / dispH;
-
-  // Offset de l'image dans le panel (centrage contain)
-  const offX = (rect.width  - dispW) / 2;
-  const offY = (rect.height - dispH) / 2;
+  const { dispW, dispH, offX, offY } = getImageLayout();
 
   const px = e.clientX - rect.left - offX;
   const py = e.clientY - rect.top  - offY;
 
   if (px < 0 || py < 0 || px > dispW || py > dispH) return;
 
-  // Prochain point à placer
   const placed = points[currentCam];
   const nextDef = POINT_DEFS.find(d => !placed[d.key]);
   if (!nextDef) return;
 
   placed[nextDef.key] = {
-    x: px * scaleX,   // coordonnées en pixels caméra réels
-    y: py * scaleY,
-    px, py,            // coordonnées d'affichage pour les markers
+    x: px * (IMG_W / dispW),
+    y: py * (IMG_H / dispH),
+    px, py,
     dispW, dispH,
   };
 
@@ -333,41 +344,38 @@ function placePoint(e) {
 // ------------------------------------------------------------------
 
 function moveMagnifier(e) {
-  const panel = document.getElementById('cam-panel');
-  const mag   = document.getElementById('magnifier');
+  const panel  = document.getElementById('cam-panel');
+  const mag    = document.getElementById('magnifier');
   const magImg = document.getElementById('mag-img');
-  const rect  = panel.getBoundingClientRect();
-  const stream = document.getElementById('cam-stream');
+  const rect   = panel.getBoundingClientRect();
+  const { dispW, dispH, offX, offY } = getImageLayout();
 
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
 
-  // Positionne la loupe au-dessus du curseur
+  // Positionne la loupe au-dessus du curseur, recadrée dans le panel
+  const diam = MAG_R * 2;
   let lx = mx - MAG_R;
-  let ly = my - MAG_R * 2 - 20;
+  let ly = my - diam - 20;
   if (ly < 0) ly = my + 20;
   if (lx < 0) lx = 0;
-  if (lx + MAG_R * 2 > rect.width) lx = rect.width - MAG_R * 2;
+  if (lx + diam > rect.width) lx = rect.width - diam;
 
   mag.style.display = 'block';
-  mag.style.left = lx + 'px';
-  mag.style.top  = ly + 'px';
-  mag.style.width  = (MAG_R * 2) + 'px';
-  mag.style.height = (MAG_R * 2) + 'px';
+  mag.style.left    = lx + 'px';
+  mag.style.top     = ly + 'px';
+  mag.style.width   = diam + 'px';
+  mag.style.height  = diam + 'px';
 
-  // Zoom : déplace l'image pour centrer sur le curseur
-  const dispW = stream.offsetWidth;
-  const dispH = stream.offsetHeight;
-  const offX = (rect.width  - dispW) / 2;
-  const offY = (rect.height - dispH) / 2;
-
+  // Position du curseur dans l'image affichée
   const imgX = mx - offX;
   const imgY = my - offY;
 
+  // L'image zoomée doit être centrée sur imgX/imgY
   magImg.style.width  = (dispW * ZOOM) + 'px';
   magImg.style.height = (dispH * ZOOM) + 'px';
-  magImg.style.left   = (-imgX * ZOOM + MAG_R) + 'px';
-  magImg.style.top    = (-imgY * ZOOM + MAG_R) + 'px';
+  magImg.style.left   = (MAG_R - imgX * ZOOM) + 'px';
+  magImg.style.top    = (MAG_R - imgY * ZOOM) + 'px';
 }
 
 function hideMagnifier() {
@@ -419,17 +427,14 @@ function renderMarkers() {
   const markers = document.getElementById('markers');
   markers.innerHTML = '';
 
-  const offX = (panel.offsetWidth  - stream.offsetWidth)  / 2;
-  const offY = (panel.offsetHeight - stream.offsetHeight) / 2;
+  const { dispW, dispH, offX, offY } = getImageLayout();
 
   POINT_DEFS.forEach((d, i) => {
     if (!placed[d.key]) return;
     const p = placed[d.key];
-    // Recalcule la position si la fenêtre a changé de taille
-    const scaleX = stream.offsetWidth  / p.dispW;
-    const scaleY = stream.offsetHeight / p.dispH;
-    const sx = p.px * scaleX + offX;
-    const sy = p.py * scaleY + offY;
+    // Recalcule depuis les coords caméra réelles (indépendant du redimensionnement)
+    const sx = (p.x / IMG_W) * dispW + offX;
+    const sy = (p.y / IMG_H) * dispH + offY;
 
     const el = document.createElement('div');
     el.className = `point-marker ${d.cls}`;
