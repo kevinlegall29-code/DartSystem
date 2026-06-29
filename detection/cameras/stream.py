@@ -78,11 +78,15 @@ class CameraStream:
 
 
 class CameraManager:
-    """Gère les 3 caméras OV9732."""
+    """Gère les 3 caméras OV9732.
+    device_indices : indices réels des devices (ex: 0, 2, 4 pour video0/video2/video4)
+    Les clés du dict sont toujours 0, 1, 2 pour le dashboard et l'API.
+    """
 
-    def __init__(self, indices: tuple = (0, 1, 2)):
+    def __init__(self, device_indices: tuple = (0, 2, 4)):
         self.cameras: dict[int, CameraStream] = {
-            i: CameraStream(index=i) for i in indices
+            slot: CameraStream(index=dev_idx)
+            for slot, dev_idx in enumerate(device_indices)
         }
 
     def start_all(self):
