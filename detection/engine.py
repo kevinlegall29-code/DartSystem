@@ -166,7 +166,11 @@ class DetectionEngine:
                 elapsed = now - self._motion_since
                 max_ref = max((r.nonzero_ref for r, _ in motion_results.values()), default=0)
                 board_empty = max_ref < self._motion[next(iter(self._motion))].min_dart_px
-                if elapsed < 1.0 and board_empty and not stable_cameras and not takeout_cameras:
+                # Garde-temps : pas de bounce-out juste après une vraie fléchette
+                # (la référence vient d'être mise à jour avec la fléchette plantée)
+                recent_dart = (now - self._last_dart_time) < 1.5
+                if (elapsed < 1.0 and board_empty and not stable_cameras
+                        and not takeout_cameras and not recent_dart):
                     if self._darts_this_turn < MAX_DARTS_PER_TURN and \
                        (now - self._takeout_time) > self._takeout_cooldown:
                         self._motion_since = 0.0
@@ -203,7 +207,11 @@ class DetectionEngine:
         if stable_cameras:
             print(f"[ENGINE] DART_STABLE cams={stable_cameras} cooldown={in_cooldown}", flush=True)
 
-        if stable_cameras and not in_cooldown and self._darts_this_turn < MAX_DARTS_PER_TURN:
+        # Cooldown court après une fléchette pour éviter de la re-détecter
+        post_dart = (time.time() - self._last_dart_time) < 1.0
+
+        if (stable_cameras and not in_cooldown and not post_dart
+                and self._darts_this_turn < MAX_DARTS_PER_TURN):
             # Attend brièvement que les autres caméras se stabilisent aussi
             await asyncio.sleep(0.1)
             frames_stable = self.cameras.read_all()
