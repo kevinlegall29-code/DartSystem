@@ -289,17 +289,25 @@ class DetectionEngine:
             if s < N_SAMPLES - 1:
                 await asyncio.sleep(0.04)
 
-        # Position finale = médiane des échantillons valides
+        # Position finale = médiane de la GRAPPE la plus dense (évite de moyenner
+        # à travers un flip pointe/flight qui créerait un score fantôme au milieu).
         if samples:
             pts = np.array(samples)
-            med = np.median(pts, axis=0)
+            best_cluster = pts
+            best_n = 0
+            for p in pts:
+                grp = pts[np.linalg.norm(pts - p, axis=1) < 50]
+                if len(grp) > best_n:
+                    best_n = len(grp)
+                    best_cluster = grp
+            med = np.median(best_cluster, axis=0)
             med_score = position_to_score(float(med[0]), float(med[1]))
             if result is not None:
                 result.x_normalized = float(med[0])
                 result.y_normalized = float(med[1])
                 result.score = med_score
                 if len(samples) >= 2:
-                    logger.info(f"MÉDIANE {len(samples)} passes → "
+                    logger.info(f"MÉDIANE-GRAPPE {best_n}/{len(samples)} passes → "
                                 f"({med[0]:.0f},{med[1]:.0f}) = {med_score.label}")
 
         if detections is None:
