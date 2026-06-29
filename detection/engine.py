@@ -56,7 +56,7 @@ class DetectionEngine:
         self._darts_this_turn = 0
         self._last_dart_time = 0.0
         self._takeout_time = 0.0   # timestamp du dernier retrait
-        self._takeout_cooldown = 2.0  # secondes à ignorer après retrait
+        self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -157,7 +157,8 @@ class DetectionEngine:
             for idx, (r, _) in motion_results.items():
                 print(f"[ENGINE] Cam{idx} état={r.state.value} consec={r.nonzero_consec} ref={r.nonzero_ref}", flush=True)
 
-        if takeout_cameras:
+        # TAKEOUT seulement si AU MOINS 2 caméras le voient (évite faux positifs)
+        if len(takeout_cameras) >= 2:
             print(f"[ENGINE] TAKEOUT sur cams {takeout_cameras}", flush=True)
             await self._handle_takeout()
             return
