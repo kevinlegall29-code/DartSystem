@@ -41,8 +41,11 @@ class DartLocation:
 
 
 def detect_dart_location(diff_frame: np.ndarray, camera_side: str = "") -> DartLocation | None:
+    # IMPORTANT : pas de MORPH_OPEN (il érode le fût FIN de la fléchette et ne
+    # laisse que le flight large). On relie juste les fragments avec CLOSE.
+    # RANSAC gère le bruit (pixels hors-axe = outliers).
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(diff_frame, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(diff_frame, cv2.MORPH_CLOSE, kernel, iterations=1)
 
     ys, xs = np.nonzero(mask)
     if len(xs) < MIN_PIXELS:
