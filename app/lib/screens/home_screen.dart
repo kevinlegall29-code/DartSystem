@@ -116,15 +116,15 @@ class _SetupViewState extends State<_SetupView> {
         crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text("MODE", style: TextStyle(letterSpacing: 1, color: Colors.white54)),
           const SizedBox(height: 10),
-          Row(children: ["501", "301", "701"].map((m) => Expanded(child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: OutlinedButton(
-              onPressed: () => setState(() => mode = m),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: mode == m ? theme.colorScheme.primary : null,
-                padding: const EdgeInsets.symmetric(vertical: 16)),
-              child: Text(m, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            )))).toList()),
+          Wrap(spacing: 8, runSpacing: 8,
+            children: ["501", "301", "701", "Cricket", "Cut Throat"].map((m) =>
+              OutlinedButton(
+                onPressed: () => setState(() => mode = m),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: mode == m ? theme.colorScheme.primary : null,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14)),
+                child: Text(m, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              )).toList()),
           const SizedBox(height: 16),
           const Text("JOUEURS", style: TextStyle(letterSpacing: 1, color: Colors.white54)),
           const SizedBox(height: 10),
@@ -140,10 +140,11 @@ class _SetupViewState extends State<_SetupView> {
           TextButton.icon(onPressed: () => setState(() =>
             players.add(TextEditingController(text: "Joueur ${players.length + 1}"))),
             icon: const Icon(Icons.add), label: const Text("Ajouter un joueur")),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Finir sur un double (double-out)"),
-            value: doubleOut, onChanged: (v) => setState(() => doubleOut = v)),
+          if (mode == "501" || mode == "301" || mode == "701")
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Finir sur un double (double-out)"),
+              value: doubleOut, onChanged: (v) => setState(() => doubleOut = v)),
         ]))),
       const SizedBox(height: 12),
       ElevatedButton.icon(
@@ -170,30 +171,34 @@ class _GameView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Column(children: [
-      // Joueurs
-      Padding(padding: const EdgeInsets.all(12), child: Column(
-        children: game.players.asMap().entries.map((e) {
-          final p = e.value;
-          final active = e.key == game.current && game.active;
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: active ? theme.colorScheme.secondary : Colors.transparent, width: 2)),
-            child: Row(children: [
-              Expanded(child: Text(p.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
-              Text("${p.score}", style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800,
-                color: active ? theme.colorScheme.secondary : theme.colorScheme.primary)),
-            ]));
-        }).toList())),
+      // Tableau joueurs : cricket (grille marques) ou x01 (scores)
+      game.isCricket
+        ? _CricketBoard(game: game)
+        : Padding(padding: const EdgeInsets.all(12), child: Column(
+            children: game.players.asMap().entries.map((e) {
+              final p = e.value;
+              final active = e.key == game.current && game.active;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: active ? theme.colorScheme.secondary : Colors.transparent, width: 2)),
+                child: Row(children: [
+                  Expanded(child: Text(p.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
+                  Text("${p.score}", style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800,
+                    color: active ? theme.colorScheme.secondary : theme.colorScheme.primary)),
+                ]));
+            }).toList()))),
 
       // Message
-      Text(game.message, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600,
-        color: game.message.contains("BUST") ? Colors.redAccent
-          : game.winner != null ? Colors.green : null)),
+      Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(game.message, textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600,
+            color: game.message.contains("BUST") ? Colors.redAccent
+              : game.winner != null ? Colors.green : null))),
 
       const Spacer(),
 
@@ -240,6 +245,51 @@ class _GameView extends StatelessWidget {
         game.correctDart(index, label, valueFromLabel(label), multFromLabel(label));
         Navigator.pop(context);
       }));
+  }
+}
+
+class _CricketBoard extends StatelessWidget {
+  final GameEngine game;
+  const _CricketBoard({required this.game});
+
+  String _marksSymbol(int m) => switch (m) { 1 => "/", 2 => "✕", >= 3 => "Ⓧ", _ => "" };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cell = const TextStyle(fontSize: 18, fontWeight: FontWeight.bold);
+    return Padding(padding: const EdgeInsets.all(8), child: Table(
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: {0: const FixedColumnWidth(54)},
+      children: [
+        // En-tête : noms + scores
+        TableRow(children: [
+          const SizedBox(),
+          ...game.players.asMap().entries.map((e) {
+            final active = e.key == game.current && game.active;
+            return Column(children: [
+              Text(e.value.name, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w600,
+                  color: active ? theme.colorScheme.secondary : null)),
+              Text("${e.value.score}", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800,
+                color: active ? theme.colorScheme.secondary : theme.colorScheme.primary)),
+            ]);
+          }),
+        ]),
+        // Lignes : cibles
+        ...cricketTargets.map((t) => TableRow(
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))),
+          children: [
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(t == 25 ? "Bull" : "$t",
+                textAlign: TextAlign.center, style: cell.copyWith(color: theme.colorScheme.secondary))),
+            ...game.players.map((p) {
+              final m = p.marks[t] ?? 0;
+              return Center(child: Text(_marksSymbol(m),
+                style: cell.copyWith(color: m >= 3 ? Colors.white38 : Colors.white)));
+            }),
+          ])),
+      ]));
   }
 }
 
