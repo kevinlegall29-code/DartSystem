@@ -150,30 +150,44 @@ def fuse_detections(
     if not tips:
         return None
 
-    # Trie les caméras par longueur de ligne décroissante (meilleure vue d'abord)
-    ranked = sorted(tips.items(), key=lambda kv: kv[1][1], reverse=True)
-    best_cam, (best_tip, best_len) = ranked[0]
+    AGREE_TOL = 70   # px : 2 pointes plus proches que ça = même fléchette
 
-    # Cherche une 2e caméra qui CONFIRME la meilleure (pointe < 70px)
-    confirmers = [best_tip]
-    used = [best_cam]
-    for cam_idx, (tip, length) in ranked[1:]:
-        if np.linalg.norm(tip - best_tip) < 70:
-            confirmers.append(tip)
-            used.append(cam_idx)
+    # Cherche le plus grand groupe de caméras dont les pointes s'accordent.
+    cam_list = list(tips.keys())
+    best_group = []
+    for ci in cam_list:
+        tip_i = tips[ci][0]
+        group = [ci]
+        for cj in cam_list:
+            if cj == ci:
+                continue
+            if np.linalg.norm(tips[cj][0] - tip_i) < AGREE_TOL:
+                group.append(cj)
+        if len(group) > len(best_group):
+            best_group = group
 
-    final = np.mean(confirmers, axis=0)
+    if len(best_group) >= 2:
+        # 2+ caméras d'accord → moyenne de leurs pointes (robuste, fiable)
+        pts = np.array([tips[c][0] for c in best_group])
+        final = pts.mean(axis=0)
+        used = best_group
+        confidence = 0.9
+    else:
+        # Aucun accord → fait confiance à la caméra avec la plus longue vue
+        best_cam = max(tips.keys(), key=lambda c: tips[c][1])
+        final = tips[best_cam][0]
+        used = [best_cam]
+        confidence = 0.5
+
     x_final, y_final = float(final[0]), float(final[1])
     score = position_to_score(x_final, y_final)
-
-    confirmed = len(confirmers) >= 2
-    logger.info(f"MEILLEURE cam{best_cam} (L={best_len:.0f}) confirmée par {used} → "
+    logger.info(f"FUSION cams {used} (accord={len(best_group)>=2}) → "
                 f"({x_final:.0f},{y_final:.0f}) = {score.label}")
 
     return FusedDartResult(
         score=score, x_normalized=x_final, y_normalized=y_final,
-        cameras_used=used, confidence=0.9 if confirmed else 0.5,
-        agreement=confirmed,
+        cameras_used=used, confidence=confidence,
+        agreement=len(best_group) >= 2,
     )
 
 
