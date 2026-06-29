@@ -82,6 +82,7 @@ class DetectionEngine:
         self._motion_since = 0.0   # début du dernier mouvement non résolu (bounce-out)
         self._motion_was_arm = False  # le mouvement a-t-il touché le bord (bras) ?
         self._motion_accum: dict[int, np.ndarray] = {}  # masque mouvement accumulé par cam
+        self._empty_reference: dict[int, np.ndarray] = {}  # board vide (pour valider retrait)
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -151,7 +152,12 @@ class DetectionEngine:
             if frame is not None:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
+                self._empty_reference[idx] = self._gray(processed)
         logger.info("Références de mouvement initialisées")
+
+    def _gray(self, frame: np.ndarray) -> np.ndarray:
+        g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return cv2.GaussianBlur(g, (5, 5), 0)
 
     async def _detection_cycle(self):
         frames = self.cameras.read_all()
@@ -231,6 +237,10 @@ class DetectionEngine:
         ]
         if board_changed:
             print(f"[ENGINE] Cible/lumière changée sur cams {board_changed} — référence recapturée", flush=True)
+            # Met à jour aussi la référence "board vide" pour la validation du retrait
+            for idx, (r, pf) in motion_results.items():
+                if r.state == MotionState.BOARD_CHANGED:
+                    self._empty_reference[idx] = self._gray(pf)
             return
 
         # TAKEOUT seulement si AU MOINS 2 caméras le voient (évite faux positifs)
@@ -404,29 +414,51 @@ class DetectionEngine:
         )
 
     async def _handle_takeout(self):
-        """Reset après retrait des fléchettes."""
+        """Candidat retrait : on CONFIRME seulement si le board est vraiment vide."""
         self._motion_since = 0.0
         self._motion_accum = {}
-        self._takeout_time = time.time()   # Démarre le cooldown
+        self._takeout_time = time.time()
 
         if self._darts_this_turn == 0:
-            return   # Faux positif, ignore
+            return   # rien à retirer
 
-        logger.info(f"Retrait détecté après {self._darts_this_turn} fléchette(s)")
-        self._darts_this_turn = 0
-
-        await self.event_bus.send_takeout()
-
-        # Attend que la scène soit RÉELLEMENT stable (bras parti) avant de
-        # capturer la nouvelle référence du board vide.
+        # Attend que le mouvement (bras) se calme
         await self._wait_until_stable()
 
+        # VALIDATION : le board est-il réellement redevenu vide (fléchettes parties) ?
+        # On compare à la référence "board vide". Un vrai retrait → board vide.
+        # Un faux positif (bras en lançant) → fléchettes toujours présentes.
         frames = self.cameras.read_all()
+        empty_cams = 0
+        total = 0
+        for idx, frame in frames.items():
+            if frame is None or idx not in self._empty_reference:
+                continue
+            total += 1
+            gray = self._gray(self._preprocess(frame, idx))
+            diff = cv2.absdiff(self._empty_reference[idx], gray)
+            _, th = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            if cv2.countNonZero(th) < 4000:   # ~vide (pas de fléchettes)
+                empty_cams += 1
+
+        if empty_cams < 2:
+            # Fausse alerte : les fléchettes sont toujours là → on N'efface PAS le tour
+            print(f"[ENGINE] Faux retrait ignoré (board pas vide : {empty_cams}/{total} cams vides)", flush=True)
+            logger.info(f"Faux retrait ignoré — board pas vide ({empty_cams}/{total})")
+            return
+
+        # Retrait CONFIRMÉ
+        logger.info(f"Retrait CONFIRMÉ après {self._darts_this_turn} fléchette(s)")
+        self._darts_this_turn = 0
+        await self.event_bus.send_takeout()
+
+        # Recapture les références du board vide
         for idx, frame in frames.items():
             if frame is not None:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
-        logger.info("Référence board vide recapturée après stabilisation")
+                self._empty_reference[idx] = self._gray(processed)
+        logger.info("Référence board vide recapturée")
 
     async def _wait_until_stable(self, needed: int = 6, timeout: float = 6.0):
         """Attend N frames consécutives sans mouvement (bras hors champ)."""
