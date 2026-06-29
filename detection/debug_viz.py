@@ -82,12 +82,21 @@ def save_normalized_view(
     cv2.line(warped, (400, 0), (400, 800), (100, 100, 100), 1)
     cv2.line(warped, (0, 400), (800, 400), (100, 100, 100), 1)
 
-    # Les 2 extrémités transformées de cette caméra (magenta = candidates)
-    if both_endpoints is not None:
+    # Ligne-fléchette transformée + extrémités (magenta)
+    if both_endpoints is not None and len(both_endpoints) >= 2:
         pts = both_endpoints.reshape(-1, 1, 2).astype(np.float32)
         tr = cv2.perspectiveTransform(pts, homography).reshape(-1, 2)
         for p in tr:
             cv2.circle(warped, (int(p[0]), int(p[1])), 7, (255, 0, 255), 2)
+        # Trace la ligne prolongée (sa direction doit pointer vers la vraie pointe)
+        d = tr[1] - tr[0]
+        n = np.linalg.norm(d)
+        if n > 1:
+            d = d / n
+            f1 = tr[0] - d * 1000
+            f2 = tr[1] + d * 1000
+            cv2.line(warped, (int(f1[0]), int(f1[1])),
+                     (int(f2[0]), int(f2[1])), (255, 0, 255), 1)
 
     if tip_normalized is not None:
         tx, ty = int(tip_normalized[0]), int(tip_normalized[1])
