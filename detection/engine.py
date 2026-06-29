@@ -180,6 +180,8 @@ class DetectionEngine:
         from detection.detection.fusion import find_tip_normalized
 
         detections = {}
+        processed_frames = {}
+        thresh_frames = {}
 
         for idx in self._homographies:
 
@@ -201,31 +203,34 @@ class DetectionEngine:
 
             location = detect_dart_location(thresh)
             detections[idx] = location
+            processed_frames[idx] = processed
+            thresh_frames[idx] = thresh
 
-            # --- DEBUG : sauvegarde les images annotées ---
+        result = fuse_detections(detections, self._homographies)
+
+        # --- DEBUG : sauvegarde les images annotées avec le consensus final ---
+        consensus = (result.x_normalized, result.y_normalized) if result else None
+        for idx in self._homographies:
+            if idx not in processed_frames:
+                continue
             try:
-                endpoints = location.corners if location else None
-                tip_norm = find_tip_normalized(location, self._homographies[idx]) if location else None
+                loc = detections.get(idx)
+                endpoints = loc.corners if loc else None
+                tip_norm = find_tip_normalized(loc, self._homographies[idx]) if loc else None
                 tip_cam = None
-                if location and endpoints is not None and len(endpoints) >= 2:
-                    # Pointe = extrémité la plus proche du centre du board EN ESPACE CAMÉRA
-                    H = self._homographies[idx]
-                    H_inv = np.linalg.inv(H)
+                if loc and endpoints is not None and len(endpoints) >= 2:
+                    H_inv = np.linalg.inv(self._homographies[idx])
                     center_cam = cv2.perspectiveTransform(
                         np.array([[[400.0, 400.0]]], dtype=np.float32), H_inv)[0][0]
                     ends = endpoints.reshape(-1, 2)
                     dists = np.linalg.norm(ends - center_cam, axis=1)
                     tip_cam = ends[int(np.argmin(dists))]
-                lbl = ""
-                if tip_norm:
-                    from detection.scoring.board_mapping import position_to_score
-                    lbl = position_to_score(tip_norm[0], tip_norm[1]).label
-                debug_viz.save_camera_detection(idx, processed, thresh, endpoints, tip_cam)
-                debug_viz.save_normalized_view(idx, processed, self._homographies[idx], tip_norm, lbl)
+                debug_viz.save_camera_detection(idx, processed_frames[idx], thresh_frames[idx], endpoints, tip_cam)
+                debug_viz.save_normalized_view(
+                    idx, processed_frames[idx], self._homographies[idx],
+                    tip_norm, "", both_endpoints=endpoints, consensus=consensus)
             except Exception as e:
                 print(f"[DEBUG] Erreur viz cam{idx}: {e}", flush=True)
-
-        result = fuse_detections(detections, self._homographies)
 
         if result is None:
             logger.debug("Fusion : aucune détection exploitable")

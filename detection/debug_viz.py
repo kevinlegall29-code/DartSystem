@@ -67,25 +67,38 @@ def save_normalized_view(
     homography: np.ndarray,
     tip_normalized: tuple[float, float] | None,
     label: str = "",
+    both_endpoints: np.ndarray | None = None,
+    consensus: tuple[float, float] | None = None,
 ):
     """
-    Sauvegarde la vue normalisée 800x800 avec les anneaux et la pointe marquée.
+    Vue normalisée 800x800 avec anneaux, les 2 extrémités transformées,
+    la pointe choisie, et le point de consensus final.
     """
     warped = cv2.warpPerspective(raw_frame, homography, (800, 800))
 
     center = (400, 400)
-    # Dessine les anneaux de scoring
     for r in RING_RADII:
         cv2.circle(warped, center, r, (0, 255, 255), 1)
-    # Croix au centre
     cv2.line(warped, (400, 0), (400, 800), (100, 100, 100), 1)
     cv2.line(warped, (0, 400), (800, 400), (100, 100, 100), 1)
+
+    # Les 2 extrémités transformées de cette caméra (magenta = candidates)
+    if both_endpoints is not None:
+        pts = both_endpoints.reshape(-1, 1, 2).astype(np.float32)
+        tr = cv2.perspectiveTransform(pts, homography).reshape(-1, 2)
+        for p in tr:
+            cv2.circle(warped, (int(p[0]), int(p[1])), 7, (255, 0, 255), 2)
 
     if tip_normalized is not None:
         tx, ty = int(tip_normalized[0]), int(tip_normalized[1])
         cv2.circle(warped, (tx, ty), 10, (0, 255, 0), 3)
         cv2.putText(warped, label, (tx + 15, ty),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
+    # Point de consensus final (rouge) — identique sur les 3 vues
+    if consensus is not None:
+        cx, cy = int(consensus[0]), int(consensus[1])
+        cv2.drawMarker(warped, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
 
     cv2.imwrite(str(DEBUG_DIR / f"cam{cam_idx}_norm.jpg"), warped,
                 [cv2.IMWRITE_JPEG_QUALITY, 80])
