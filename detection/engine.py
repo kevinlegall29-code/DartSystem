@@ -208,12 +208,14 @@ class DetectionEngine:
                 tip_norm = find_tip_normalized(location, self._homographies[idx]) if location else None
                 tip_cam = None
                 if location and endpoints is not None and len(endpoints) >= 2:
-                    # Retrouve quelle extrémité est la pointe (la plus proche du centre normalisé)
+                    # Pointe = extrémité la plus proche du centre du board EN ESPACE CAMÉRA
                     H = self._homographies[idx]
-                    pts = endpoints.reshape(-1, 1, 2).astype(np.float32)
-                    tr = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
-                    dists = np.linalg.norm(tr - np.array([400.0, 400.0]), axis=1)
-                    tip_cam = endpoints[int(np.argmin(dists))]
+                    H_inv = np.linalg.inv(H)
+                    center_cam = cv2.perspectiveTransform(
+                        np.array([[[400.0, 400.0]]], dtype=np.float32), H_inv)[0][0]
+                    ends = endpoints.reshape(-1, 2)
+                    dists = np.linalg.norm(ends - center_cam, axis=1)
+                    tip_cam = ends[int(np.argmin(dists))]
                 lbl = ""
                 if tip_norm:
                     from detection.scoring.board_mapping import position_to_score

@@ -34,38 +34,37 @@ BOARD_CENTER_NORM = np.array([400.0, 400.0])
 
 def find_tip_normalized(location: DartLocation, homography: np.ndarray) -> tuple[float, float] | None:
     """
-    Trouve la pointe en transformant les DEUX EXTRÉMITÉS de la droite fléchette.
-    La pointe = l'extrémité la plus proche du centre du board (400,400) en espace normalisé.
-    Fonctionne pour toutes les positions de caméra (côté, dessus, dessous).
+    Trouve la pointe de la fléchette.
+
+    Principe géométrique clé : l'homographie n'est valide QUE pour les points
+    sur le plan du board. La pointe est plantée dans le board (sur le plan),
+    le flight est au-dessus (hors plan → projection erronée).
+
+    On choisit donc la pointe en espace CAMÉRA (la fléchette pointe vers le
+    centre du board), puis on projette UNIQUEMENT ce point.
     """
     corners = location.corners.reshape(-1, 2).astype(np.float32)
     if len(corners) < 2:
         return None
 
-    # Ajuste une droite à tous les corners (le fût de la fléchette)
-    line = cv2.fitLine(corners.reshape(-1, 1, 2), cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
-    vx, vy, x0, y0 = float(line[0]), float(line[1]), float(line[2]), float(line[3])
+    # Centre du board projeté en espace caméra (via homographie inverse)
+    H_inv = np.linalg.inv(homography)
+    center_cam = cv2.perspectiveTransform(
+        np.array([[[400.0, 400.0]]], dtype=np.float32), H_inv
+    )[0][0]
 
-    # Projette tous les corners sur la droite, trouve les deux extrémités
-    direction = np.array([vx, vy])
-    ts = (corners - np.array([x0, y0])) @ direction
-    t_min, t_max = float(ts.min()), float(ts.max())
+    # La pointe = l'extrémité la plus proche du centre du board EN ESPACE CAMÉRA
+    # (la fléchette entre depuis la périphérie en pointant vers le centre)
+    d0 = np.linalg.norm(corners[0] - center_cam)
+    d1 = np.linalg.norm(corners[1] - center_cam)
+    tip_cam = corners[0] if d0 <= d1 else corners[1]
 
-    end1 = np.array([x0 + t_min * vx, y0 + t_min * vy], dtype=np.float32)
-    end2 = np.array([x0 + t_max * vx, y0 + t_max * vy], dtype=np.float32)
+    # Projette UNIQUEMENT la pointe (elle est sur le plan du board)
+    tip_norm = cv2.perspectiveTransform(
+        np.array([[tip_cam]], dtype=np.float32), homography
+    )[0][0]
 
-    # Transforme les deux extrémités en espace normalisé
-    pts = np.array([[end1], [end2]], dtype=np.float32)
-    transformed = cv2.perspectiveTransform(pts, homography)
-    norm1 = transformed[0][0]
-    norm2 = transformed[1][0]
-
-    # La pointe = l'extrémité la plus proche du centre (enfoncée dans le board)
-    d1 = np.linalg.norm(norm1 - BOARD_CENTER_NORM)
-    d2 = np.linalg.norm(norm2 - BOARD_CENTER_NORM)
-
-    tip = norm1 if d1 <= d2 else norm2
-    return float(tip[0]), float(tip[1])
+    return float(tip_norm[0]), float(tip_norm[1])
 
 
 def fuse_detections(
