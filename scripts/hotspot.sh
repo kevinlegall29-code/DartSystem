@@ -1,55 +1,39 @@
 #!/bin/bash
-# Configure le Raspberry Pi en point d'accès Wi-Fi autonome
-# Les tablettes/téléphones se connectent directement au RPi, sans box Internet
+# Crée un hotspot Wi-Fi autonome sur le Raspberry Pi (Bookworm / NetworkManager).
+# Les tablettes/téléphones/PC se connectent directement au Pi, sans box internet.
+#
+# Usage : bash scripts/hotspot.sh [SSID] [MOT_DE_PASSE]
 set -e
 
-SSID="DartSystem"
-PASSWORD="darts1234"
-IP="192.168.50.1"
+SSID="${1:-DartSystem}"
+PASSWORD="${2:-darts12345}"   # 8 caractères minimum
+CON="dartsystem-hotspot"
 
-echo "=== Configuration Hotspot Wi-Fi ==="
+echo "=== Configuration Hotspot Wi-Fi (NetworkManager) ==="
 
-sudo apt install -y hostapd dnsmasq
+# Supprime un éventuel ancien hotspot du même nom
+sudo nmcli connection delete "$CON" 2>/dev/null || true
 
-# Configuration hostapd
-sudo tee /etc/hostapd/hostapd.conf > /dev/null <<EOF
-interface=wlan0
-driver=nl80211
-ssid=$SSID
-hw_mode=g
-channel=7
-wmm_enabled=0
-macaddr_acl=0
-auth_algs=1
-wpa=2
-wpa_passphrase=$PASSWORD
-wpa_key_mgmt=WPA-PSK
-rsn_pairwise=CCMP
-EOF
+# Crée la connexion point d'accès
+sudo nmcli connection add type wifi ifname wlan0 con-name "$CON" autoconnect yes ssid "$SSID"
+sudo nmcli connection modify "$CON" \
+    802-11-wireless.mode ap \
+    802-11-wireless.band bg \
+    ipv4.method shared \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$PASSWORD"
 
-sudo sed -i 's|#DAEMON_CONF=""|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
+# Active le hotspot
+sudo nmcli connection up "$CON"
 
-# IP statique
-sudo tee -a /etc/dhcpcd.conf > /dev/null <<EOF
-interface wlan0
-    static ip_address=$IP/24
-    nohook wpa_supplicant
-EOF
-
-# DHCP pour les clients
-sudo tee /etc/dnsmasq.conf > /dev/null <<EOF
-interface=wlan0
-dhcp-range=192.168.50.10,192.168.50.50,255.255.255.0,24h
-EOF
-
-sudo systemctl unmask hostapd
-sudo systemctl enable hostapd
-sudo systemctl restart hostapd
-sudo systemctl restart dnsmasq
-
+IP=$(nmcli -g IP4.ADDRESS device show wlan0 | cut -d/ -f1 | head -1)
 echo ""
-echo "=== Hotspot configuré ==="
+echo "=== Hotspot actif ==="
 echo "SSID     : $SSID"
 echo "Password : $PASSWORD"
-echo "IP RPi   : $IP"
-echo "API URL  : http://$IP:8080"
+echo "IP du Pi : ${IP:-10.42.0.1}"
+echo ""
+echo "Sur ton téléphone/PC : connecte-toi au Wi-Fi '$SSID'"
+echo "Puis ouvre : http://${IP:-10.42.0.1}:8080"
+echo ""
+echo "Le hotspot redémarre automatiquement à chaque boot du Pi."
