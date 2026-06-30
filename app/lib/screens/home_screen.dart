@@ -117,7 +117,8 @@ class _SetupViewState extends State<_SetupView> {
           const Text("MODE", style: TextStyle(letterSpacing: 1, color: Colors.white54)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8,
-            children: ["501", "301", "701", "Cricket", "Cut Throat"].map((m) =>
+            children: ["501", "301", "701", "Cricket", "Cut Throat",
+                       "Around the Clock", "Count Up", "Shanghai", "Football"].map((m) =>
               OutlinedButton(
                 onPressed: () => setState(() => mode = m),
                 style: OutlinedButton.styleFrom(
@@ -192,6 +193,13 @@ class _GameView extends StatelessWidget {
                     color: active ? theme.colorScheme.secondary : theme.colorScheme.primary)),
                 ]));
             }).toList())),
+
+      // Ligne de contexte (manche, cible, possession…)
+      if (game.contextLine.isNotEmpty)
+        Padding(padding: const EdgeInsets.only(top: 4),
+          child: Text(game.contextLine, textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+              letterSpacing: .5, color: theme.colorScheme.secondary))),
 
       // Message
       Padding(padding: const EdgeInsets.symmetric(vertical: 8),
