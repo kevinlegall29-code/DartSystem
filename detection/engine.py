@@ -85,6 +85,7 @@ class DetectionEngine:
 
         self._running = False
         self._darts_this_turn = 0
+        self._empty_confirm = 0    # frames consécutives board vide (auto-reset compteur)
         self._last_dart_time = 0.0
         self._takeout_time = 0.0   # timestamp du dernier retrait
         self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
@@ -270,6 +271,24 @@ class DetectionEngine:
             print(f"[ENGINE] TAKEOUT sur cams {takeout_cameras}", flush=True)
             await self._handle_takeout()
             return
+
+        # Auto-reset du compteur de volée si le board est revenu VIDE (toutes
+        # caméras) un court instant. Évite que la 1re volée d'une partie soit
+        # bloquée par un compteur resté à 3 (lancers de test, partie quittée
+        # sans retrait…). Ne se déclenche jamais tant qu'une fléchette est plantée.
+        board_empty = bool(motion_results) and all(
+            r.nonzero_ref < self._motion[idx].min_dart_px
+            for idx, (r, _) in motion_results.items())
+        if (self._darts_this_turn > 0 and board_empty
+                and not motion_cameras and not stable_cameras and not takeout_cameras
+                and (time.time() - self._last_dart_time) > 1.5):
+            self._empty_confirm += 1
+            if self._empty_confirm >= 8:
+                print(f"[ENGINE] Board vide → reset compteur ({self._darts_this_turn}→0)", flush=True)
+                self._darts_this_turn = 0
+                self._empty_confirm = 0
+        else:
+            self._empty_confirm = 0
 
         # Ignore DART_STABLE pendant le cooldown post-retrait
         in_cooldown = (time.time() - self._takeout_time) < self._takeout_cooldown
