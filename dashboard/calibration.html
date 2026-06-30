@@ -57,6 +57,13 @@
     .point-marker.p1 { background: #00bfff; }
     .point-marker.p2 { background: #ff6b6b; }
     .point-marker.p3 { background: #7fff00; }
+    .point-marker.dbl { background: #ffd700; width: 22px; height: 22px; font-size: 9px; }
+    .point-marker.trb { background: #00bfff; width: 22px; height: 22px; font-size: 9px; }
+
+    /* Sélecteur de mode */
+    .mode-toggle { display: flex; gap: 6px; }
+    .mode-toggle .btn.mode { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+    .mode-toggle .btn.mode.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
 
     /* Loupe */
     .magnifier {
@@ -84,8 +91,8 @@
       font-size: 0.85rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px;
     }
 
-    /* Guide des 4 points */
-    .points-guide { padding: 16px; border-bottom: 1px solid #21262d; }
+    /* Guide des points */
+    .points-guide { padding: 16px; border-bottom: 1px solid #21262d; max-height: 38vh; overflow-y: auto; }
     .point-row {
       display: flex; align-items: center; gap: 12px;
       padding: 10px 12px; border-radius: 8px; margin-bottom: 8px;
@@ -98,6 +105,8 @@
     .point-dot.p1 { background: #00bfff; }
     .point-dot.p2 { background: #ff6b6b; }
     .point-dot.p3 { background: #7fff00; }
+    .point-dot.dbl { background: #ffd700; }
+    .point-dot.trb { background: #00bfff; }
     .point-info { flex: 1; }
     .point-name { font-size: 0.9rem; font-weight: 600; }
     .point-hint { font-size: 0.75rem; color: #8b949e; }
@@ -153,6 +162,10 @@
 <header>
   <span>🎯</span>
   <h1>DartSystem — Calibration Board</h1>
+  <div class="mode-toggle">
+    <button class="btn mode active" id="mode-simple" onclick="setMode('simple')">Simple · 4 pts</button>
+    <button class="btn mode" id="mode-advanced" onclick="setMode('advanced')">Avancée · 20 pts</button>
+  </div>
   <div class="ip-row">
     <label>IP RPi :</label>
     <input id="rpi-ip" type="text" value="192.168.1.24">
@@ -225,12 +238,40 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const POINT_DEFS = [
-  { key: '20_1',  label: 'Fil 20 / 1',  hint: '12h — haut',   cls: 'p0' },
-  { key: '6_10',  label: 'Fil 6 / 10',  hint: '3h — droite',  cls: 'p1' },
-  { key: '3_19',  label: 'Fil 3 / 19',  hint: '6h — bas',     cls: 'p2' },
-  { key: '11_14', label: 'Fil 11 / 14', hint: '9h — gauche',  cls: 'p3' },
+const SIMPLE_DEFS = [
+  { key: '20_1',  label: 'Fil 20 / 1',  hint: '12h — anneau double',   cls: 'p0' },
+  { key: '6_10',  label: 'Fil 6 / 10',  hint: '3h — anneau double',    cls: 'p1' },
+  { key: '3_19',  label: 'Fil 3 / 19',  hint: '6h — anneau double',    cls: 'p2' },
+  { key: '11_14', label: 'Fil 11 / 14', hint: '9h — anneau double',    cls: 'p3' },
 ];
+
+// Ordre des secteurs (frontière 20/1 en haut), identique au scoring.
+const SECTORS_BM = [1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5, 20];
+
+// 20 points avancés = les 20 frontières, alternées anneau double / triple.
+const ADVANCED_DEFS = Array.from({ length: 20 }, (_, j) => {
+  const a = SECTORS_BM[(j + 19) % 20];   // (j-1) mod 20
+  const b = SECTORS_BM[j];
+  const isDouble = j % 2 === 0;
+  return {
+    key: `i${j}`, i: j,
+    label: `Fil ${a} / ${b}`,
+    hint: `${isDouble ? 'anneau DOUBLE (extérieur)' : 'anneau TRIPLE'}`,
+    cls: isDouble ? 'dbl' : 'trb',
+  };
+});
+
+let mode = 'simple';
+function curDefs() { return mode === 'simple' ? SIMPLE_DEFS : ADVANCED_DEFS; }
+
+function setMode(m) {
+  if (mode === m) return;
+  mode = m;
+  document.getElementById('mode-simple').classList.toggle('active', m === 'simple');
+  document.getElementById('mode-advanced').classList.toggle('active', m === 'advanced');
+  // Les indices diffèrent → on repart à zéro pour cette caméra
+  resetPoints();
+}
 
 const ZOOM = 3;
 const MAG_R = 75;   // rayon loupe px
@@ -324,7 +365,7 @@ function placePoint(e) {
   if (px < 0 || py < 0 || px > dispW || py > dispH) return;
 
   const placed = points[currentCam];
-  const nextDef = POINT_DEFS.find(d => !placed[d.key]);
+  const nextDef = curDefs().find(d => !placed[d.key]);
   if (!nextDef) return;
 
   placed[nextDef.key] = {
@@ -388,10 +429,10 @@ function hideMagnifier() {
 
 function renderGuide() {
   const placed = points[currentCam];
-  const nextDef = POINT_DEFS.find(d => !placed[d.key]);
+  const nextDef = curDefs().find(d => !placed[d.key]);
   const guide = document.getElementById('points-guide');
 
-  guide.innerHTML = POINT_DEFS.map((d, i) => {
+  guide.innerHTML = curDefs().map((d, i) => {
     const isPlaced = !!placed[d.key];
     const isActive = !isPlaced && d === nextDef;
     const cls = isPlaced ? 'placed' : (isActive ? 'active' : '');
@@ -411,12 +452,15 @@ function renderGuide() {
   }).join('');
 
   // Instruction flottante
-  const instr = document.getElementById('instr-point');
+  const instruction = document.getElementById('instruction');
   if (nextDef) {
-    instr.textContent = nextDef.label;
-    document.getElementById('instruction').style.display = 'block';
+    const placedN = curDefs().filter(d => !!placed[d.key]).length;
+    instruction.innerHTML =
+      `Cliquez le <strong>${nextDef.label}</strong> — ${nextDef.hint}` +
+      (mode === 'advanced' ? ` &nbsp;(${placedN + 1}/${curDefs().length})` : '');
+    instruction.style.display = 'block';
   } else {
-    document.getElementById('instruction').style.display = 'none';
+    instruction.style.display = 'none';
   }
 }
 
@@ -429,7 +473,7 @@ function renderMarkers() {
 
   const { dispW, dispH, offX, offY } = getImageLayout();
 
-  POINT_DEFS.forEach((d, i) => {
+  curDefs().forEach((d, i) => {
     if (!placed[d.key]) return;
     const p = placed[d.key];
     // Recalcule depuis les coords caméra réelles (indépendant du redimensionnement)
@@ -456,8 +500,8 @@ function renderNormalized() {
 function removePoint(key) {
   delete points[currentCam][key];
   // Supprime aussi les points placés après (ordre obligatoire)
-  const idx = POINT_DEFS.findIndex(d => d.key === key);
-  POINT_DEFS.slice(idx + 1).forEach(d => delete points[currentCam][d.key]);
+  const idx = curDefs().findIndex(d => d.key === key);
+  curDefs().slice(idx + 1).forEach(d => delete points[currentCam][d.key]);
   calibrated[currentCam] = false;
   renderGuide();
   renderMarkers();
@@ -466,8 +510,14 @@ function removePoint(key) {
 }
 
 function updateButtons() {
-  const allPlaced = POINT_DEFS.every(d => !!points[currentCam][d.key]);
-  document.getElementById('btn-calibrate').disabled = !allPlaced;
+  const placed = curDefs().filter(d => !!points[currentCam][d.key]).length;
+  const total = curDefs().length;
+  const minPts = mode === 'simple' ? total : 6;   // avancée : dès 6 points
+  const btn = document.getElementById('btn-calibrate');
+  btn.disabled = placed < minPts;
+  btn.textContent = mode === 'simple'
+    ? '📐 Calibrer'
+    : `📐 Calibrer (${placed}/${total})`;
 }
 
 // ------------------------------------------------------------------
@@ -476,19 +526,31 @@ function updateButtons() {
 
 async function sendCalibration() {
   const placed = points[currentCam];
-  const apiPoints = {};
-  POINT_DEFS.forEach(d => {
-    apiPoints[d.key] = { x: placed[d.key].x, y: placed[d.key].y };
-  });
+
+  let url, payload;
+  if (mode === 'simple') {
+    const apiPoints = {};
+    SIMPLE_DEFS.forEach(d => {
+      apiPoints[d.key] = { x: placed[d.key].x, y: placed[d.key].y };
+    });
+    url = `${baseUrl}/calibration/board`;
+    payload = { camera_index: currentCam, points: apiPoints };
+  } else {
+    const list = ADVANCED_DEFS
+      .filter(d => placed[d.key])
+      .map(d => ({ i: d.i, x: placed[d.key].x, y: placed[d.key].y }));
+    url = `${baseUrl}/calibration/board/advanced`;
+    payload = { camera_index: currentCam, points: list };
+  }
 
   document.getElementById('btn-calibrate').disabled = true;
   document.getElementById('btn-calibrate').textContent = '⏳ Calcul...';
 
   try {
-    const res = await fetch(`${baseUrl}/calibration/board`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ camera_index: currentCam, points: apiPoints }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
 
@@ -511,8 +573,7 @@ async function sendCalibration() {
     toast('Impossible de joindre l\'API : ' + e.message, 'err');
   }
 
-  document.getElementById('btn-calibrate').disabled = false;
-  document.getElementById('btn-calibrate').textContent = '📐 Calibrer';
+  updateButtons();
 }
 
 function showNormalized(b64, validation) {

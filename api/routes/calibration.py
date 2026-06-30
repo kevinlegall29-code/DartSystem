@@ -10,7 +10,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from detection.calibration.board import (
-    compute_homography, normalize_frame, validate_calibration,
+    compute_homography, compute_homography_advanced, advanced_point_targets,
+    normalize_frame, validate_calibration,
     save_board_calibration, load_board_calibration,
 )
 from detection.calibration.lens import load_lens_calibration, undistort
@@ -27,6 +28,31 @@ class CalibPoint(BaseModel):
 class BoardCalibRequest(BaseModel):
     camera_index: int
     points: dict[str, CalibPoint]   # {"20_1": {x,y}, "6_10": {x,y}, ...}
+
+
+class AdvPoint(BaseModel):
+    i: int          # index de la frontière (0–19)
+    x: float
+    y: float
+
+
+class AdvBoardCalibRequest(BaseModel):
+    camera_index: int
+    points: list[AdvPoint]   # ≥ 4 points indexés
+
+
+def _undistort_cam_frame(camera_index: int):
+    """Lit une frame de la caméra et corrige la distorsion si dispo."""
+    from api.routes.cameras import camera_manager
+    frame = camera_manager.cameras[camera_index].read()
+    if frame is None:
+        raise HTTPException(503, f"Caméra {camera_index} non disponible")
+    try:
+        K, D = load_lens_calibration(camera_index, DATA_DIR)
+        frame = undistort(frame, K, D)
+    except FileNotFoundError:
+        pass
+    return frame
 
 
 @router.post("/board")
@@ -69,6 +95,48 @@ async def calibrate_board(req: BoardCalibRequest):
     return {
         "success": True,
         "camera_index": req.camera_index,
+        "validation": validation,
+        "normalized_image_b64": img_b64,
+    }
+
+
+@router.get("/board/advanced/plan")
+async def advanced_plan():
+    """Séquence des points de la calibration avancée (pour guider l'UI)."""
+    targets = advanced_point_targets()
+    return {"points": [
+        {"i": i, "label": t["label"], "ring": t["ring"]}
+        for i, t in sorted(targets.items())
+    ]}
+
+
+@router.post("/board/advanced")
+async def calibrate_board_advanced(req: AdvBoardCalibRequest):
+    """
+    Calibration avancée : N points (frontières aux anneaux double/triple) →
+    homographie par moindres carrés (plus précise et robuste que 4 points).
+    """
+    pts = [{"i": p.i, "x": p.x, "y": p.y} for p in req.points]
+    try:
+        H = compute_homography_advanced(pts)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    frame = _undistort_cam_frame(req.camera_index)
+    normalized = normalize_frame(frame, H)
+    validation = validate_calibration(normalized)
+
+    # Sauvegarde (src_points = liste indexée, pour pouvoir relire/refaire)
+    src_points = {str(p.i): {"x": p.x, "y": p.y} for p in req.points}
+    save_board_calibration(req.camera_index, src_points, H, validation, DATA_DIR)
+
+    _, buf = cv2.imencode(".jpg", normalized, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    img_b64 = base64.b64encode(buf).decode()
+
+    return {
+        "success": True,
+        "camera_index": req.camera_index,
+        "points_used": len(req.points),
         "validation": validation,
         "normalized_image_b64": img_b64,
     }

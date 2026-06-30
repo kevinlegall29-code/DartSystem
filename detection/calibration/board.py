@@ -4,6 +4,7 @@ Les 4 points sont placés aux intersections des fils de secteur sur l'anneau dou
 """
 
 import cv2
+import math
 import numpy as np
 import json
 import logging
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_SIZE = 800       # Image normalisée 800×800 pixels
 DOUBLE_RADIUS = 340     # Rayon du double ring dans l'espace normalisé (pixels)
+TREBLE_RADIUS = 214     # Rayon extérieur du triple dans l'espace normalisé (pixels)
 
 # Positions destination des 4 points dans l'espace normalisé (800×800, centre=400)
 # Intersections choisies : écartées à ~90° pour maximiser la précision homographique
@@ -48,6 +50,52 @@ def compute_homography(src_points: dict[str, tuple[float, float]]) -> np.ndarray
     src = np.float32([src_points[k] for k in keys])
     dst = np.float32([CALIB_POINTS_DST[k] for k in keys])
     H = cv2.getPerspectiveTransform(src, dst)
+    return H
+
+
+# Ordre des secteurs pour le scoring (frontière 20/1 en haut). Voir board_mapping.
+_SECTORS_BM = [1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5, 20]
+
+
+def advanced_point_targets() -> dict[int, dict]:
+    """
+    20 points de calibration avancée = les 20 frontières de secteurs, alternées
+    entre l'anneau DOUBLE (pairs) et l'anneau TRIPLE (impairs). Deux rayons
+    contraignent bien mieux la perspective qu'un seul cercle.
+
+    Retourne {index: {"label", "ring", "dst": (x, y)}}, index 0 = frontière 20/1 (haut).
+    """
+    out = {}
+    for j in range(20):
+        a = _SECTORS_BM[(j - 1) % 20]
+        b = _SECTORS_BM[j]
+        r = DOUBLE_RADIUS if j % 2 == 0 else TREBLE_RADIUS
+        th = math.radians(j * 18.0)
+        dst = (400.0 + r * math.sin(th), 400.0 - r * math.cos(th))
+        out[j] = {"label": f"{a}_{b}", "ring": "double" if j % 2 == 0 else "treble", "dst": dst}
+    return out
+
+
+def compute_homography_advanced(points: list[dict]) -> np.ndarray:
+    """
+    Homographie robuste par moindres carrés sur N points (N ≥ 4).
+
+    points : [{"i": index, "x": px, "y": py}, ...] — coords image (après undistort).
+    Les erreurs de clic se compensent statistiquement → bien plus précis.
+    """
+    targets = advanced_point_targets()
+    src, dst = [], []
+    for p in points:
+        i = int(p["i"])
+        if i not in targets:
+            continue
+        src.append((float(p["x"]), float(p["y"])))
+        dst.append(targets[i]["dst"])
+    if len(src) < 4:
+        raise ValueError(f"Au moins 4 points requis (reçu {len(src)})")
+    H, mask = cv2.findHomography(np.float32(src), np.float32(dst), 0)  # 0 = moindres carrés
+    if H is None:
+        raise ValueError("Homographie impossible (points colinéaires ?)")
     return H
 
 
