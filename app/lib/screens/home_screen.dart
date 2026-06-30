@@ -275,11 +275,11 @@ class _GameView extends StatelessWidget {
   const _GameView({required this.game});
 
   List<Impact> get _impacts {
-    final n = game.turnDarts.length;
+    // Ignore les fléchettes ajoutées à la main (position inconnue → pas de croix)
+    final shown = [for (final d in game.turnDarts) if (!d.manual) d];
     return [
-      for (int i = 0; i < n; i++)
-        Impact(game.turnDarts[i].x, game.turnDarts[i].y,
-            game.turnDarts[i].label, latest: i == n - 1),
+      for (int i = 0; i < shown.length; i++)
+        Impact(shown[i].x, shown[i].y, shown[i].label, latest: i == shown.length - 1),
     ];
   }
 
@@ -314,6 +314,30 @@ class _GameView extends StatelessWidget {
             color: game.message.contains("BUST") ? Colors.redAccent
               : game.winner != null ? cyan : Colors.white)),
         const SizedBox(height: 8),
+
+        // Volée précédente (plus petite, corrigeable même après retrait)
+        if (game.type == GameType.x01 && game.prevTurnDarts.isNotEmpty) ...[
+          Text("Volée précédente — ${game.players[game.prevTurnPlayer].name}",
+            style: const TextStyle(fontSize: 11, color: Colors.white38)),
+          const SizedBox(height: 4),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            for (int i = 0; i < game.prevTurnDarts.length; i++)
+              GestureDetector(
+                onTap: () => _correctPrev(context, i),
+                child: Container(
+                  width: 60, height: 38, margin: const EdgeInsets.symmetric(horizontal: 5),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .03),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white24)),
+                  child: Text(game.prevTurnDarts[i].label,
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+                      color: game.prevTurnDarts[i].bust ? Colors.redAccent : Colors.white70)),
+                )),
+          ]),
+          const SizedBox(height: 10),
+        ],
 
         // Volée en cours (3 fléchettes)
         Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(3, (i) {
@@ -360,12 +384,29 @@ class _GameView extends StatelessWidget {
   }
 
   void _correct(BuildContext context, int index) {
-    if (index >= game.turnDarts.length) return;
+    final isEmpty = index >= game.turnDarts.length;
     showModalBottomSheet(context: context, backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (_) => _CorrectionSheet(onPick: (label) {
-        game.correctDart(index, label, valueFromLabel(label), multFromLabel(label));
-        Navigator.pop(context);
-      }));
+      builder: (_) => _CorrectionSheet(
+        title: isEmpty ? "Ajouter une fléchette non détectée" : "Corriger la fléchette",
+        onPick: (label) {
+          if (isEmpty) {
+            // Fléchette manquée par la détection → on l'ajoute à la main
+            game.registerDart(label, valueFromLabel(label), multFromLabel(label), manual: true);
+          } else {
+            game.correctDart(index, label, valueFromLabel(label), multFromLabel(label));
+          }
+          Navigator.pop(context);
+        }));
+  }
+
+  void _correctPrev(BuildContext context, int index) {
+    showModalBottomSheet(context: context, backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (_) => _CorrectionSheet(
+        title: "Corriger la volée précédente",
+        onPick: (label) {
+          game.correctPrevDart(index, label, valueFromLabel(label), multFromLabel(label));
+          Navigator.pop(context);
+        }));
   }
 }
 
@@ -447,7 +488,8 @@ class _CricketBoard extends StatelessWidget {
 
 class _CorrectionSheet extends StatefulWidget {
   final void Function(String label) onPick;
-  const _CorrectionSheet({required this.onPick});
+  final String title;
+  const _CorrectionSheet({required this.onPick, this.title = "Corriger la fléchette"});
   @override
   State<_CorrectionSheet> createState() => _CorrectionSheetState();
 }
@@ -459,7 +501,7 @@ class _CorrectionSheetState extends State<_CorrectionSheet> {
     final cyan = Theme.of(context).colorScheme.primary;
     return Padding(padding: const EdgeInsets.all(16), child: Column(
       mainAxisSize: MainAxisSize.min, children: [
-        const Text("Corriger la fléchette", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         Row(children: [["S","Simple"],["D","Double"],["T","Triple"]].map((m) => Expanded(
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),

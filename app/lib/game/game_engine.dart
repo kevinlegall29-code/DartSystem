@@ -19,7 +19,9 @@ class TurnDart {
   final bool bust;
   final double x;   // position normalisée de l'impact (0–800, centre 400)
   final double y;
-  TurnDart(this.label, this.value, {this.bust = false, this.x = 400, this.y = 400});
+  final bool manual;   // ajoutée à la main (non détectée) → pas de croix sur la cible
+  TurnDart(this.label, this.value,
+      {this.bust = false, this.x = 400, this.y = 400, this.manual = false});
 }
 
 const List<int> cricketTargets = [20, 19, 18, 17, 16, 15, 25];
@@ -40,9 +42,15 @@ class GameEngine extends ChangeNotifier {
   String? winner;
   String message = "Aucune partie";
   double _curX = 400, _curY = 400;   // position de la fléchette en cours de traitement
+  bool _curManual = false;
+
+  // Volée précédente (conservée après retrait, pour correction a posteriori)
+  List<TurnDart> prevTurnDarts = [];
+  int prevTurnPlayer = -1;
+  int prevTurnStartScore = 0;
 
   TurnDart _td(String label, int value, {bool bust = false}) =>
-      TurnDart(label, value, bust: bust, x: _curX, y: _curY);
+      TurnDart(label, value, bust: bust, x: _curX, y: _curY, manual: _curManual);
 
   bool get isCricket => type == GameType.cricket || type == GameType.cutthroat;
 
@@ -84,10 +92,11 @@ class GameEngine extends ChangeNotifier {
   }
 
   void registerDart(String label, int value, int multiplier,
-      {double x = 400, double y = 400}) {
+      {double x = 400, double y = 400, bool manual = false}) {
     if (!active || winner != null || turnDarts.length >= 3) return;
     _curX = x;
     _curY = y;
+    _curManual = manual;
     switch (type) {
       case GameType.x01: _x01Dart(label, value, multiplier);
       case GameType.cricket || GameType.cutthroat: _cricketDart(label, value, multiplier);
@@ -236,6 +245,12 @@ class GameEngine extends ChangeNotifier {
 
   void nextPlayer() {
     if (!active || winner != null) return;
+    // Conserve la volée qui se termine (pour correction a posteriori)
+    if (turnDarts.isNotEmpty) {
+      prevTurnDarts = List<TurnDart>.from(turnDarts);
+      prevTurnPlayer = current;
+      prevTurnStartScore = turnStartScore;
+    }
     current = (current + 1) % players.length;
     if (current == 0) {
       round++;
@@ -277,10 +292,58 @@ class GameEngine extends ChangeNotifier {
     turnDarts = [];
     final saved = winner; winner = null; active = true;
     for (final d in darts) {
-      _curX = d.x; _curY = d.y;
+      _curX = d.x; _curY = d.y; _curManual = d.manual;
       _x01Dart(d.label, d.value, multFromLabel(d.label));
     }
+    _curManual = false;
     if (winner == null) winner = saved;
+    notifyListeners();
+  }
+
+  /// Corrige une fléchette de la volée PRÉCÉDENTE (déjà retirée) et recalcule
+  /// le score du joueur concerné. x01 uniquement.
+  void correctPrevDart(int index, String label, int value, int multiplier) {
+    if (type != GameType.x01) return;
+    if (prevTurnPlayer < 0 || index >= prevTurnDarts.length) return;
+
+    final darts = List<TurnDart>.from(prevTurnDarts);
+    final old = darts[index];
+    darts[index] = TurnDart(label, value, x: old.x, y: old.y, manual: old.manual);
+
+    final savedCurrent = current;
+    final savedTurn = List<TurnDart>.from(turnDarts);
+    final savedTurnStart = turnStartScore;
+    final saved = winner;
+
+    // Rejoue la volée précédente pour son joueur, depuis son score d'avant-volée
+    final p = players[prevTurnPlayer];
+    p.score = prevTurnStartScore;
+    current = prevTurnPlayer;
+    winner = null; active = true;
+    turnDarts = [];
+    for (final d in darts) {
+      _curX = d.x; _curY = d.y; _curManual = d.manual;
+      _x01Dart(d.label, d.value, multFromLabel(d.label));
+    }
+    prevTurnDarts = List<TurnDart>.from(turnDarts);
+
+    // Restaure la volée en cours
+    current = savedCurrent;
+    if (prevTurnPlayer == savedCurrent) {
+      // Solo : même joueur → réapplique la volée en cours par-dessus
+      turnStartScore = p.score;
+      turnDarts = [];
+      for (final d in savedTurn) {
+        _curX = d.x; _curY = d.y; _curManual = d.manual;
+        _x01Dart(d.label, d.value, multFromLabel(d.label));
+      }
+    } else {
+      turnStartScore = savedTurnStart;
+      turnDarts = savedTurn;
+    }
+    _curManual = false;
+    if (winner == null) winner = saved;
+    message = _turnMsg();
     notifyListeners();
   }
 
