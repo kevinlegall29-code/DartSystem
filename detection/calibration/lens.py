@@ -21,50 +21,25 @@ MAX_REPROJ_ERROR = 1.0      # Erreur de reprojection acceptable (pixels)
 _accum: dict = {}
 
 
-def _objp_for(size: tuple[int, int]):
-    objp = np.zeros((size[0] * size[1], 3), np.float32)
-    objp[:, :2] = np.mgrid[0:size[0], 0:size[1]].T.reshape(-1, 2)
+def _objp():
+    objp = np.zeros((CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
+    objp[:, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
     return objp
-
-
-def _find_board(gray):
-    """Détection robuste du damier. Essaie SB puis classique, dans les 2 orientations.
-    Retourne (found, corners, size_utilisée)."""
-    sizes = [CHECKERBOARD, (CHECKERBOARD[1], CHECKERBOARD[0])]  # (8,5) et (5,8)
-
-    # 1) Détecteur moderne SB (le plus robuste) si disponible
-    if hasattr(cv2, "findChessboardCornersSB"):
-        for sz in sizes:
-            try:
-                found, corners = cv2.findChessboardCornersSB(
-                    gray, sz, flags=cv2.CALIB_CB_NORMALIZE_IMAGE)
-            except cv2.error:
-                found = False
-            if found:
-                return True, corners, sz
-
-    # 2) Fallback classique avec rehaussement de contraste (CLAHE)
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
-    for src in (gray, enhanced):
-        for sz in sizes:
-            found, corners = cv2.findChessboardCorners(src, sz, flags)
-            if found:
-                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-                corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-                return True, corners, sz
-    return False, None, None
 
 
 def lens_capture(cam_idx: int, frame: np.ndarray) -> tuple[bool, int]:
     """Détecte le damier sur une frame. Si trouvé, l'ajoute. Retourne (trouvé, nb_total)."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    found, corners = cv2.findChessboardCorners(
+        gray, CHECKERBOARD,
+        cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK,
+    )
     acc = _accum.setdefault(cam_idx, {"objpoints": [], "imgpoints": [], "shape": gray.shape[::-1]})
-    found, corners, sz = _find_board(gray)
     if not found:
         return False, len(acc["objpoints"])
-    acc["objpoints"].append(_objp_for(sz))
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+    acc["objpoints"].append(_objp())
     acc["imgpoints"].append(corners)
     acc["shape"] = gray.shape[::-1]
     return True, len(acc["objpoints"])
