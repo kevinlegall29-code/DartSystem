@@ -171,94 +171,69 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
-    # CONSENSUS INTER-CAMÉRAS sur les DEUX bouts de chaque fléchette.
-    # La vraie pointe se projette au même endroit depuis toutes les caméras ;
-    # les flights (hors plan) divergent. On choisit donc, pour chaque caméra,
-    # le bout qui converge avec les autres → redondance robuste.
-    AGREE_TOL = 75   # px
-    # Zone acceptée jusqu'au surround (au-delà du double à 340) pour compter les MISS.
-    # Le bruit aberrant (homographie qui déraille) est bien au-delà (>500).
-    ON_BOARD = 480
+    # CONSENSUS INTER-CAMÉRAS + REJET D'OUTLIER.
+    # Chaque caméra propose ses 2 bouts. La vraie pointe se projette au même
+    # endroit depuis toutes les caméras (les flights divergent). On cherche la
+    # grappe la plus serrée (1 point par caméra), on rejette les outliers, on moyenne.
+    AGREE_TOL = 50   # px — resserré : les pointes vraies s'accordent à ~30px
+    ON_BOARD = 480   # accepte jusqu'au surround (MISS) ; au-delà = aberrant
 
     def on_board(p):
         return np.linalg.norm(np.asarray(p) - BOARD_CENTER_NORM) < ON_BOARD
 
     # 2 candidats normalisés par caméra (pointe + flight, ordre incertain)
-    cand = {}   # cam_idx -> [pt_norm, pt_norm]
+    cand = {}   # cam_idx -> [pt_norm, ...] (on-board uniquement)
     for cam_idx in cam_indices:
         loc = detections[cam_idx]
         ends = loc.corners[:2].reshape(-1, 1, 2).astype(np.float32)
         tr = cv2.perspectiveTransform(ends, homographies[cam_idx]).reshape(-1, 2)
-        cand[cam_idx] = [tr[0], tr[1]]
+        cand[cam_idx] = [p for p in tr if on_board(p)]
         for k, p in enumerate(tr):
             s = position_to_score(float(p[0]), float(p[1]))
             logger.info(f"[CAM{cam_idx}] bout{k}=({p[0]:.0f},{p[1]:.0f}) → {s.label}")
 
-    # Consensus : on ne considère que les bouts DANS le board (filtre les aberrants).
-    best_group = None
+    # Pour chaque candidat-ancre, rassemble le bout le plus proche de CHAQUE autre
+    # caméra (< TOL), rejette les outliers vs la médiane, garde la meilleure grappe.
+    best = None
     best_key = (0, 1e9)
     for ci in cam_indices:
         for pi in cand[ci]:
-            if not on_board(pi):
-                continue
-            group = [pi]
-            cams_used = [ci]
+            group = {ci: pi}
             for cj in cam_indices:
-                if cj == ci:
+                if cj == ci or not cand[cj]:
                     continue
-                onb = [q for q in cand[cj] if on_board(q)]
-                if not onb:
-                    continue
-                nearest = min(onb, key=lambda q: np.linalg.norm(q - pi))
+                nearest = min(cand[cj], key=lambda q: np.linalg.norm(q - pi))
                 if np.linalg.norm(nearest - pi) < AGREE_TOL:
-                    group.append(nearest)
-                    cams_used.append(cj)
-            if len(cams_used) >= 2:
-                spread = max(np.linalg.norm(a - b) for a in group for b in group)
-                key = (len(cams_used), -spread)
-                if key > best_key:
-                    best_key = key
-                    best_group = (np.mean(group, axis=0), cams_used)
+                    group[cj] = nearest
+            if len(group) >= 2:
+                pts = np.array(list(group.values()))
+                med = np.median(pts, axis=0)
+                # rejet d'outlier : ne garde que les caméras proches de la médiane
+                inliers = {c: p for c, p in group.items()
+                           if np.linalg.norm(p - med) < AGREE_TOL}
+                if len(inliers) >= 2:
+                    ipts = np.array(list(inliers.values()))
+                    spread = float(max(np.linalg.norm(a - b) for a in ipts for b in ipts))
+                    key = (len(inliers), -spread)
+                    if key > best_key:
+                        best_key = key
+                        best = (ipts.mean(axis=0), list(inliers.keys()))
 
-    if best_group is not None:
-        # MÉTHODE 1 : consensus inter-caméras (le plus fiable)
-        final, used = best_group
+    if best is not None:
+        # Consensus multi-caméras (le plus fiable)
+        final, used = best
         confidence, agreement, method = 0.9, True, "consensus"
     else:
-        # MÉTHODE 2 : croisé des lignes RANSAC — rejette la caméra défaillante.
-        # On ne garde que les caméras ayant un bout dans le board.
-        tip = None
-        valid_lines = [
-            ln for ln, c in zip(lines, cam_indices)
-            if any(on_board(p) for p in cand[c])
-        ]
-        if len(valid_lines) >= 2:
-            inter, inliers = _ransac_intersection(valid_lines)
-            if inter is not None and on_board(inter) and len(inliers) >= 2:
-                tip = inter
-        if tip is not None:
-            final = np.asarray(tip)
-            used = cam_indices
-            confidence, agreement, method = 0.7, False, "intersection"
-        else:
-            # MÉTHODE 3 : meilleure caméra ayant un bout DANS le board
-            lengths = dict(zip(cam_indices, [l[2] for l in lines]))
-            onboard_cams = [
-                c for c in cam_indices if any(on_board(p) for p in cand[c])
-            ]
-            if not onboard_cams:
-                logger.info("FUSION : aucun point plausible dans le board")
-                return None
-
-            best_cam = max(onboard_cams, key=lambda c: lengths[c])
-
-            # Pointe = corners[0] (vote densité/centroïde de corners.py).
-            tip_cand = cand[best_cam][0]
-            if not on_board(tip_cand) and on_board(cand[best_cam][1]):
-                tip_cand = cand[best_cam][1]
-            final = tip_cand
-            used = [best_cam]
-            confidence, agreement, method = 0.5, False, "mono-caméra"
+        # Aucun accord → meilleure caméra (ligne la plus longue), pointe = corners[0]
+        lengths = dict(zip(cam_indices, [l[2] for l in lines]))
+        onboard_cams = [c for c in cam_indices if cand[c]]
+        if not onboard_cams:
+            logger.info("FUSION : aucun point plausible dans le board")
+            return None
+        best_cam = max(onboard_cams, key=lambda c: lengths[c])
+        final = cand[best_cam][0]   # corners[0] = pointe (vote densité/centroïde)
+        used = [best_cam]
+        confidence, agreement, method = 0.5, False, "mono-caméra"
 
     x_final, y_final = float(final[0]), float(final[1])
     score = position_to_score(x_final, y_final)
