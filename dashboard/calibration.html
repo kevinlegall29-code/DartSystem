@@ -239,10 +239,10 @@
 
 <script>
 const SIMPLE_DEFS = [
-  { key: '20_1',  label: 'Fil 20 / 1',  hint: '12h — anneau double',   cls: 'p0' },
-  { key: '6_10',  label: 'Fil 6 / 10',  hint: '3h — anneau double',    cls: 'p1' },
-  { key: '3_19',  label: 'Fil 3 / 19',  hint: '6h — anneau double',    cls: 'p2' },
-  { key: '11_14', label: 'Fil 11 / 14', hint: '9h — anneau double',    cls: 'p3' },
+  { key: '20_1',  label: 'Fil 20 / 1',  hint: '12h — bord EXTÉRIEUR du double',  cls: 'p0' },
+  { key: '6_10',  label: 'Fil 6 / 10',  hint: '3h — bord EXTÉRIEUR du double',   cls: 'p1' },
+  { key: '3_19',  label: 'Fil 3 / 19',  hint: '6h — bord EXTÉRIEUR du double',   cls: 'p2' },
+  { key: '11_14', label: 'Fil 11 / 14', hint: '9h — bord EXTÉRIEUR du double',   cls: 'p3' },
 ];
 
 // Ordre des secteurs (frontière 20/1 en haut), identique au scoring.
@@ -256,7 +256,7 @@ const ADVANCED_DEFS = Array.from({ length: 20 }, (_, j) => {
   return {
     key: `i${j}`, i: j,
     label: `Fil ${a} / ${b}`,
-    hint: `${isDouble ? 'anneau DOUBLE (extérieur)' : 'anneau TRIPLE'}`,
+    hint: isDouble ? 'bord EXTÉRIEUR du double' : 'bord EXTÉRIEUR du triple',
     cls: isDouble ? 'dbl' : 'trb',
   };
 });
