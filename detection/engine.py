@@ -471,31 +471,36 @@ class DetectionEngine:
             await self.event_bus.send_game_state(st)
 
     async def _handle_takeout(self):
-        """Retrait des fléchettes → fin de tour. Modèle simple et robuste."""
+        """Retrait des fléchettes → fin de tour + recapture d'une référence propre."""
         self._motion_since = 0.0
         self._motion_accum = {}
 
-        if self._darts_this_turn == 0:
-            self._takeout_time = time.time()
-            return   # rien à retirer
+        had_darts = self._darts_this_turn > 0
 
-        # Anti-faux-positif : pas de takeout juste après une fléchette (mi-lancer).
-        # Un retrait survient quand le joueur a fini de lancer (≥1s après le dernier dart).
-        if time.time() - self._last_dart_time < 1.0:
+        # Anti-faux-positif : pas de fin-de-tour juste après une fléchette (mi-lancer).
+        # (Seulement si des fléchettes étaient comptées — sinon c'est juste un
+        #  nettoyage du board, qu'on veut traiter pour rafraîchir la référence.)
+        if had_darts and time.time() - self._last_dart_time < 1.0:
             return
 
         self._takeout_time = time.time()
-        logger.info(f"Retrait après {self._darts_this_turn} fléchette(s)")
         self._darts_this_turn = 0
-        await self.event_bus.send_takeout()
 
-        # Fin de tour côté jeu → joueur suivant
-        from api.game_logic import game
-        if game.active:
-            st = game.end_turn()
-            await self.event_bus.send_game_state(st)
+        # Avance le tour de jeu UNIQUEMENT s'il y avait des fléchettes comptées.
+        # Si le board contenait des fléchettes "d'avant la partie" qu'on retire
+        # pour commencer, on ne touche pas au jeu — on rafraîchit juste la réf.
+        if had_darts:
+            logger.info(f"Retrait après fléchette(s)")
+            await self.event_bus.send_takeout()
+            from api.game_logic import game
+            if game.active:
+                st = game.end_turn()
+                await self.event_bus.send_game_state(st)
+        else:
+            logger.info("Board nettoyé (aucune fléchette comptée) → recapture référence")
 
-        # Attend la stabilité puis recapture les références (nouveau board vide)
+        # Dans TOUS les cas : attend la stabilité puis recapture une référence
+        # board-vide propre. Corrige le cas des fléchettes déjà plantées au boot.
         await self._wait_until_stable()
         frames = self.cameras.read_all()
         for idx, frame in frames.items():

@@ -286,7 +286,7 @@
   <button class="btn secondary" onclick="reloadCalib()">↺ Recharger calibrations</button>
   <button class="btn secondary" onclick="resetDarts()">Effacer tour</button>
   <label style="margin-left:16px; color:#8b949e;">Exposition :</label>
-  <input type="range" id="exposure-slider" min="50" max="2500" value="500" step="50"
+  <input type="range" id="exposure-slider" min="50" max="5000" value="500" step="50"
          style="width:120px; accent-color:#388bfd;"
          oninput="document.getElementById('exposure-val').textContent=this.value"
          onchange="setExposure(this.value)">
