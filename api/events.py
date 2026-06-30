@@ -64,7 +64,9 @@ class EventBus:
             "label": score_label, "score": score_value, "cameras": camera_info,
         })
         self._ble({"t": "dart", "label": score_label, "value": score_value,
-                   "mult": camera_info.get("multiplier", 1)})
+                   "mult": camera_info.get("multiplier", 1),
+                   "x": int(camera_info.get("x", 400)),
+                   "y": int(camera_info.get("y", 400))})
 
     async def send_game_state(self, state: dict):
         await self.broadcast("game_state", state)

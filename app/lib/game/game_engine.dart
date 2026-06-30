@@ -17,7 +17,9 @@ class TurnDart {
   final String label;
   final int value;
   final bool bust;
-  TurnDart(this.label, this.value, {this.bust = false});
+  final double x;   // position normalisée de l'impact (0–800, centre 400)
+  final double y;
+  TurnDart(this.label, this.value, {this.bust = false, this.x = 400, this.y = 400});
 }
 
 const List<int> cricketTargets = [20, 19, 18, 17, 16, 15, 25];
@@ -37,6 +39,10 @@ class GameEngine extends ChangeNotifier {
   int possession = -1;        // football
   String? winner;
   String message = "Aucune partie";
+  double _curX = 400, _curY = 400;   // position de la fléchette en cours de traitement
+
+  TurnDart _td(String label, int value, {bool bust = false}) =>
+      TurnDart(label, value, bust: bust, x: _curX, y: _curY);
 
   bool get isCricket => type == GameType.cricket || type == GameType.cutthroat;
 
@@ -77,8 +83,11 @@ class GameEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  void registerDart(String label, int value, int multiplier) {
+  void registerDart(String label, int value, int multiplier,
+      {double x = 400, double y = 400}) {
     if (!active || winner != null || turnDarts.length >= 3) return;
+    _curX = x;
+    _curY = y;
     switch (type) {
       case GameType.x01: _x01Dart(label, value, multiplier);
       case GameType.cricket || GameType.cutthroat: _cricketDart(label, value, multiplier);
@@ -101,16 +110,16 @@ class GameEngine extends ChangeNotifier {
       bust = true;
     } else if (remaining == 0) {
       if (doubleOut && !isDouble) { bust = true; }
-      else { p.score = 0; turnDarts.add(TurnDart(label, value)); _win(p); return; }
+      else { p.score = 0; turnDarts.add(_td(label, value)); _win(p); return; }
     } else if (remaining == 1 && doubleOut) { bust = true; }
     if (bust) {
-      turnDarts.add(TurnDart(label, value, bust: true));
+      turnDarts.add(_td(label, value, bust: true));
       p.score = turnStartScore;
       message = "💥 BUST ! ${p.name}";
       notifyListeners(); return;
     }
     p.score = remaining;
-    turnDarts.add(TurnDart(label, value));
+    turnDarts.add(_td(label, value));
     message = turnDarts.length >= 3 ? "${p.name} : retirez les fléchettes"
                                     : "${p.name} — ${p.score} restants";
     notifyListeners();
@@ -122,7 +131,7 @@ class GameEngine extends ChangeNotifier {
     p.dartsThrown++;
     final base = baseFromLabel(label);
     if (!cricketTargets.contains(base)) {
-      turnDarts.add(TurnDart(label, value)); message = p.name; notifyListeners(); return;
+      turnDarts.add(_td(label, value)); message = p.name; notifyListeners(); return;
     }
     final prev = p.marks[base] ?? 0;
     final closing = (3 - prev).clamp(0, multiplier);
@@ -137,7 +146,7 @@ class GameEngine extends ChangeNotifier {
         } else { p.score += pts; }
       }
     }
-    turnDarts.add(TurnDart(label, value));
+    turnDarts.add(_td(label, value));
     message = p.name; notifyListeners();
     _checkCricketWin(p);
   }
@@ -158,12 +167,12 @@ class GameEngine extends ChangeNotifier {
     if (base == p.target) {
       p.target++;
       p.score = p.target - 1;      // nombres validés
-      if (p.target > 20) { turnDarts.add(TurnDart(label, base)); _win(p); return; }
+      if (p.target > 20) { turnDarts.add(_td(label, base)); _win(p); return; }
       message = "${p.name} → vise le ${p.target}";
     } else {
       message = "${p.name} → vise le ${p.target}";
     }
-    turnDarts.add(TurnDart(label, base));
+    turnDarts.add(_td(label, base));
     notifyListeners();
   }
 
@@ -172,7 +181,7 @@ class GameEngine extends ChangeNotifier {
     final p = players[current];
     p.dartsThrown++;
     p.score += value;
-    turnDarts.add(TurnDart(label, value));
+    turnDarts.add(_td(label, value));
     message = "${p.name} — ${p.score} pts";
     notifyListeners();
   }
@@ -188,11 +197,11 @@ class GameEngine extends ChangeNotifier {
       final mults = turnDarts.where((d) => baseFromLabel(d.label) == round)
           .map((d) => multFromLabel(d.label)).toSet()..add(multiplier);
       if (mults.containsAll({1, 2, 3})) {
-        turnDarts.add(TurnDart(label, value));
+        turnDarts.add(_td(label, value));
         message = "🎯 SHANGHAI ! ${p.name} gagne !"; _win(p); return;
       }
     }
-    turnDarts.add(TurnDart(label, value));
+    turnDarts.add(_td(label, value));
     message = "${p.name} — manche $round (vise $round)";
     notifyListeners();
   }
@@ -206,7 +215,7 @@ class GameEngine extends ChangeNotifier {
       if (possession == current) {
         p.score++;                   // but !
         message = "⚽ BUT ! ${p.name} : ${p.score}";
-        if (p.score >= goalsToWin) { turnDarts.add(TurnDart(label, 0)); _win(p); return; }
+        if (p.score >= goalsToWin) { turnDarts.add(_td(label, 0)); _win(p); return; }
       } else {
         possession = current;        // prend / vole la possession
         message = "${p.name} a la possession";
@@ -215,7 +224,7 @@ class GameEngine extends ChangeNotifier {
       message = "${p.name} — possession : "
           "${possession >= 0 ? players[possession].name : 'aucune'}";
     }
-    turnDarts.add(TurnDart(label, 0));
+    turnDarts.add(_td(label, 0));
     notifyListeners();
   }
 
@@ -261,12 +270,16 @@ class GameEngine extends ChangeNotifier {
   void correctDart(int index, String label, int value, int multiplier) {
     if (index >= turnDarts.length || type != GameType.x01) return;
     final darts = List<TurnDart>.from(turnDarts);
-    darts[index] = TurnDart(label, value);
+    // Garde la position d'impact d'origine (la croix ne bouge pas)
+    darts[index] = TurnDart(label, value, x: darts[index].x, y: darts[index].y);
     final p = players[current];
     p.score = turnStartScore;
     turnDarts = [];
     final saved = winner; winner = null; active = true;
-    for (final d in darts) { _x01Dart(d.label, d.value, multFromLabel(d.label)); }
+    for (final d in darts) {
+      _curX = d.x; _curY = d.y;
+      _x01Dart(d.label, d.value, multFromLabel(d.label));
+    }
     if (winner == null) winner = saved;
     notifyListeners();
   }

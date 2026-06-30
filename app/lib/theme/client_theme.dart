@@ -26,23 +26,23 @@ class ClientTheme {
   });
 
   static const fallback = ClientTheme(
-    name: "DartSystem",
-    primary: Color(0xFF1565C0),
-    accent: Color(0xFFFFD700),
-    background: Color(0xFF0A0A0A),
-    surface: Color(0xFF1A1A2E),
-    text: Color(0xFFFFFFFF),
-    fontFamily: "Roboto",
+    name: "DART SYSTEM",
+    primary: Color(0xFF1FE0FF),     // cyan néon
+    accent: Color(0xFFB14EFF),      // violet néon
+    background: Color(0xFF05070D),  // bleu-noir profond
+    surface: Color(0xFF0E1422),
+    text: Color(0xFFEAF6FF),
+    fontFamily: "Rajdhani",
   );
 
   factory ClientTheme.fromJson(Map<String, dynamic> j) => ClientTheme(
-        name: j['name'] ?? "DartSystem",
-        primary: _hex(j['primaryColor'] ?? "#1565C0"),
-        accent: _hex(j['accentColor'] ?? "#FFD700"),
-        background: _hex(j['backgroundColor'] ?? "#0A0A0A"),
-        surface: _hex(j['surfaceColor'] ?? "#1A1A2E"),
-        text: _hex(j['textColor'] ?? "#FFFFFF"),
-        fontFamily: j['fontFamily'] ?? "Roboto",
+        name: j['name'] ?? "DART SYSTEM",
+        primary: _hex(j['primaryColor'] ?? "#1FE0FF"),
+        accent: _hex(j['accentColor'] ?? "#B14EFF"),
+        background: _hex(j['backgroundColor'] ?? "#05070D"),
+        surface: _hex(j['surfaceColor'] ?? "#0E1422"),
+        text: _hex(j['textColor'] ?? "#EAF6FF"),
+        fontFamily: j['fontFamily'] ?? "Rajdhani",
         logo: j['logo'],
       );
 

@@ -16,13 +16,18 @@ class DartEvent {
   final String label;           // ex: "T20"
   final int value;              // points
   final int multiplier;         // 1/2/3
-  DartEvent({required this.type, this.label = "", this.value = 0, this.multiplier = 1});
+  final double x;               // position normalisée (0–800, centre 400)
+  final double y;
+  DartEvent({required this.type, this.label = "", this.value = 0,
+             this.multiplier = 1, this.x = 400, this.y = 400});
 
   factory DartEvent.fromJson(Map<String, dynamic> j) => DartEvent(
         type: j['t'] ?? '',
         label: j['label'] ?? '',
         value: (j['value'] ?? 0) as int,
         multiplier: (j['mult'] ?? 1) as int,
+        x: ((j['x'] ?? 400) as num).toDouble(),
+        y: ((j['y'] ?? 400) as num).toDouble(),
       );
 }
 

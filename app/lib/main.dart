@@ -42,7 +42,7 @@ class _DartSystemAppState extends State<DartSystemApp> {
     // Relie les events BLE au moteur de jeu
     ble.events.listen((e) {
       if (e.type == 'dart') {
-        game.registerDart(e.label, e.value, e.multiplier);
+        game.registerDart(e.label, e.value, e.multiplier, x: e.x, y: e.y);
       } else if (e.type == 'takeout') {
         game.onTakeout();
       }
