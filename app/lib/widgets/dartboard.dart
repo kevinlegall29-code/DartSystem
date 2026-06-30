@@ -125,8 +125,15 @@ class _DartboardPainter extends CustomPainter {
     }
 
     // --- Impacts (croix) ---
+    // Le scoring place la frontière 20/1 en haut (le 20 occupe 342–360°).
+    // Notre cible dessine le 20 CENTRÉ en haut → on tourne les impacts d'un
+    // demi-secteur (+9°) pour les aligner sur les secteurs visuels.
+    const half = 9 * math.pi / 180;
     for (final imp in impacts) {
-      final p = center + Offset((imp.x - 400) * s, (imp.y - 400) * s);
+      final dx = imp.x - 400, dy = imp.y - 400;
+      final mag = math.sqrt(dx * dx + dy * dy);
+      final theta = math.atan2(dx, -dy) + half;   // horaire depuis le haut + offset visuel
+      final p = center + Offset(math.sin(theta), -math.cos(theta)) * (mag * s);
       _cross(canvas, p, imp.latest, px(15));
     }
   }
