@@ -80,6 +80,7 @@ class DetectionEngine:
 
         # Calibrations chargées au démarrage
         self._lens: dict[int, tuple] = {}
+        self._undistort_maps: dict[int, tuple] = {}   # cartes remap précalculées (rapide)
         self._homographies: dict[int, np.ndarray] = {}
 
         self._running = False
@@ -118,6 +119,7 @@ class DetectionEngine:
     def reload_calibrations(self):
         """Recharge les calibrations à chaud (après recalibration depuis l'app)."""
         self._lens.clear()
+        self._undistort_maps.clear()
         self._homographies.clear()
         self.load_calibrations()
 
@@ -518,8 +520,17 @@ class DetectionEngine:
     # ------------------------------------------------------------------
 
     def _preprocess(self, frame: np.ndarray, cam_idx: int) -> np.ndarray:
-        """Corrige la distorsion si calibration disponible."""
-        if cam_idx in self._lens:
+        """Corrige la distorsion si calibration disponible.
+
+        Utilise des cartes remap précalculées (cv2.remap) au lieu de cv2.undistort
+        qui recalcule les cartes à chaque appel → ~10× plus rapide sur Pi4.
+        """
+        if cam_idx not in self._lens:
+            return frame
+        maps = self._undistort_maps.get(cam_idx)
+        if maps is None:
             K, D = self._lens[cam_idx]
-            return undistort(frame, K, D)
-        return frame
+            h, w = frame.shape[:2]
+            maps = cv2.initUndistortRectifyMap(K, D, None, K, (w, h), cv2.CV_16SC2)
+            self._undistort_maps[cam_idx] = maps
+        return cv2.remap(frame, maps[0], maps[1], cv2.INTER_LINEAR)
