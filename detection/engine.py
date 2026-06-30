@@ -33,12 +33,12 @@ SYNC_WINDOW = 0.3
 MAX_DARTS_PER_TURN = 3
 
 # Nombre de passes de détection moyennées (médiane) pour réduire le jitter
-N_SAMPLES = 4
+N_SAMPLES = 3
 
 # Sauvegarde des images de debug (lourd : 6 warps + écriture disque par fléchette).
 # Désactivé par défaut pour la fluidité — activer seulement pour le réglage.
 DEBUG_VIZ = False
-SAMPLE_DELAY = 0.04   # secondes entre passes de moyennage
+SAMPLE_DELAY = 0.025   # secondes entre passes de moyennage
 POST_DART_COOLDOWN = 0.5   # garde-temps après une fléchette (évite re-détection)
 
 # Isolation par masque de mouvement (expérimental) — désactivé : causait des
@@ -147,7 +147,7 @@ class DetectionEngine:
             cycle += 1
             if cycle % 100 == 0:
                 print(f"[ENGINE] Cycle {cycle} — toujours actif", flush=True)
-            await asyncio.sleep(0.05)   # ~20 Hz
+            await asyncio.sleep(0.02)   # ~50 Hz (boucle allégée : plus de remap d'image)
 
     async def stop(self):
         self._running = False
@@ -316,7 +316,11 @@ class DetectionEngine:
                 if cv2.countNonZero(masked) > 60:
                     thresh = masked
 
-            detections[idx] = detect_dart_location(thresh)
+            loc = detect_dart_location(thresh)
+            if loc is not None:
+                # Corrige la distorsion uniquement sur les points pointe/flight
+                loc.corners = self._undistort_corners(loc.corners, idx)
+            detections[idx] = loc
             processed_frames[idx] = processed
             thresh_frames[idx] = thresh
 
@@ -520,17 +524,20 @@ class DetectionEngine:
     # ------------------------------------------------------------------
 
     def _preprocess(self, frame: np.ndarray, cam_idx: int) -> np.ndarray:
-        """Corrige la distorsion si calibration disponible.
+        """Aucun traitement sur l'image entière (rapide).
 
-        Utilise des cartes remap précalculées (cv2.remap) au lieu de cv2.undistort
-        qui recalcule les cartes à chaque appel → ~10× plus rapide sur Pi4.
+        On ne corrige PLUS la distorsion sur la frame complète : la détection de
+        mouvement et le diff travaillent en espace brut. La correction distorsion
+        est appliquée uniquement sur les 2 points pointe/flight (undistortPoints)
+        juste avant l'homographie → identique mathématiquement, ~100× plus rapide.
         """
+        return frame
+
+    def _undistort_corners(self, corners: np.ndarray, cam_idx: int) -> np.ndarray:
+        """Corrige la distorsion sur quelques points seulement (microsecondes)."""
         if cam_idx not in self._lens:
-            return frame
-        maps = self._undistort_maps.get(cam_idx)
-        if maps is None:
-            K, D = self._lens[cam_idx]
-            h, w = frame.shape[:2]
-            maps = cv2.initUndistortRectifyMap(K, D, None, K, (w, h), cv2.CV_16SC2)
-            self._undistort_maps[cam_idx] = maps
-        return cv2.remap(frame, maps[0], maps[1], cv2.INTER_LINEAR)
+            return corners
+        K, D = self._lens[cam_idx]
+        pts = np.asarray(corners, dtype=np.float32).reshape(-1, 1, 2)
+        und = cv2.undistortPoints(pts, K, D, P=K)
+        return und.reshape(corners.shape)
