@@ -16,6 +16,70 @@ MIN_CAPTURES = 12           # Minimum pour une bonne calibration
 MAX_REPROJ_ERROR = 1.0      # Erreur de reprojection acceptable (pixels)
 
 
+# --- Calibration headless (pilotée par le web) ---------------------------------
+# Accumulateur par caméra : {cam_idx: {"objpoints": [...], "imgpoints": [...], "shape": (w,h)}}
+_accum: dict = {}
+
+
+def _objp():
+    objp = np.zeros((CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
+    objp[:, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
+    return objp
+
+
+def lens_capture(cam_idx: int, frame: np.ndarray) -> tuple[bool, int]:
+    """Détecte le damier sur une frame. Si trouvé, l'ajoute. Retourne (trouvé, nb_total)."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    found, corners = cv2.findChessboardCorners(
+        gray, CHECKERBOARD,
+        cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE + cv2.CALIB_CB_FAST_CHECK,
+    )
+    acc = _accum.setdefault(cam_idx, {"objpoints": [], "imgpoints": [], "shape": gray.shape[::-1]})
+    if not found:
+        return False, len(acc["objpoints"])
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+    acc["objpoints"].append(_objp())
+    acc["imgpoints"].append(corners)
+    acc["shape"] = gray.shape[::-1]
+    return True, len(acc["objpoints"])
+
+
+def lens_count(cam_idx: int) -> int:
+    return len(_accum.get(cam_idx, {}).get("objpoints", []))
+
+
+def lens_reset(cam_idx: int):
+    _accum.pop(cam_idx, None)
+
+
+def lens_compute(cam_idx: int, output_dir: Path) -> dict:
+    """Calcule et sauvegarde la calibration distorsion à partir des captures accumulées."""
+    acc = _accum.get(cam_idx)
+    if not acc or len(acc["objpoints"]) < MIN_CAPTURES:
+        n = len(acc["objpoints"]) if acc else 0
+        raise ValueError(f"Pas assez de captures ({n}/{MIN_CAPTURES} minimum)")
+
+    error, K, D, _, _ = cv2.calibrateCamera(
+        acc["objpoints"], acc["imgpoints"], acc["shape"], None, None)
+
+    result = {
+        "camera_index": cam_idx,
+        "image_size": list(acc["shape"]),
+        "reprojection_error": round(float(error), 4),
+        "camera_matrix": K.tolist(),
+        "dist_coefficients": D.tolist(),
+        "captures_used": len(acc["objpoints"]),
+    }
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / f"lens_cam{cam_idx}.json", "w") as f:
+        json.dump(result, f, indent=2)
+    lens_reset(cam_idx)
+    logger.info(f"Calibration distorsion cam{cam_idx} sauvée — erreur {error:.3f}px")
+    return result
+
+
 def collect_calibration_frames(camera_index: int, target: int = 15) -> list:
     """
     Capture interactive des frames du damier.

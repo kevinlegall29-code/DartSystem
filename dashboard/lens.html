@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DartSystem — Calibration distorsion</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; }
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+    h1 { font-size: 1.1rem; }
+    .ip-row { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .ip-row input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 5px 10px; width: 130px; }
+    a.btn, button.btn { text-decoration: none; border: none; border-radius: 6px; padding: 8px 14px; font-weight: 600; font-size: .85rem; cursor: pointer; }
+    .btn.sec { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+    .btn.pri { background: #238636; color: #fff; }
+    .btn.cap { background: #1f6feb; color: #fff; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .info { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 14px; font-size: .85rem; color: #8b949e; }
+    .info b { color: #58a6ff; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .cam { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; }
+    .cam h2 { font-size: .9rem; margin-bottom: 8px; color: #58a6ff; }
+    .cam img { width: 100%; border-radius: 6px; border: 1px solid #30363d; background: #000; aspect-ratio: 16/9; object-fit: contain; }
+    .count { font-size: 1.6rem; font-weight: 800; text-align: center; margin: 8px 0; }
+    .count small { font-size: .8rem; color: #8b949e; font-weight: 400; }
+    .row { display: flex; gap: 8px; }
+    .row .btn { flex: 1; }
+    .status { font-size: .8rem; text-align: center; min-height: 1.2em; margin-top: 6px; }
+    .ok { color: #3fb950; } .bad { color: #f85149; }
+  </style>
+</head>
+<body>
+<header>
+  <span>📐</span>
+  <h1>Calibration distorsion (objectifs 100°)</h1>
+  <div class="ip-row">
+    <label style="font-size:.8rem;color:#8b949e">IP Pi :</label>
+    <input id="ip" value="10.42.0.1">
+    <a class="btn sec" href="checkerboard.html" target="_blank">Damier à imprimer</a>
+    <a class="btn sec" href="index.html">← Dashboard</a>
+  </div>
+</header>
+
+<div class="info">
+  Corrige la déformation des objectifs grand-angle (cruciale pour la précision sur les bords, ex. le 20).
+  <br>1. Imprime le <b>damier bleu</b> (bouton ci-dessus), colle-le sur un carton plat.
+  <br>2. Pour <b>chaque caméra</b> : tiens le damier devant, varie les <b>angles et distances</b>, clique <b>Capturer</b> à chaque position (vise <b>15+ captures</b>, bien réparties : centre, coins, incliné).
+  <br>3. Clique <b>Calculer</b> → la correction est sauvegardée et appliquée.
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const base = () => `http://${document.getElementById('ip').value.trim()}:8080`;
+
+function camCard(i) {
+  return `
+  <div class="cam">
+    <h2>Caméra ${i + 1}</h2>
+    <img id="img${i}" src="">
+    <div class="count"><span id="cnt${i}">0</span> <small>captures</small></div>
+    <div class="row">
+      <button class="btn cap" onclick="capture(${i})">📸 Capturer</button>
+      <button class="btn pri" onclick="compute(${i})">Calculer</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn sec" onclick="reset(${i})">Réinitialiser</button>
+    </div>
+    <div class="status" id="st${i}"></div>
+  </div>`;
+}
+
+function refreshStreams() {
+  const t = Date.now();
+  for (let i = 0; i < 3; i++)
+    document.getElementById(`img${i}`).src = `${base()}/cameras/stream/${i}?t=${t}`;
+}
+
+async function capture(i) {
+  setStatus(i, "Détection du damier…");
+  try {
+    const r = await fetch(`${base()}/calibration/lens/capture/${i}`, { method: 'POST' });
+    const d = await r.json();
+    document.getElementById(`cnt${i}`).textContent = d.count;
+    setStatus(i, d.found ? "✓ Damier capturé !" : "✗ Damier non détecté, repositionne", d.found);
+  } catch (e) { setStatus(i, "Erreur réseau", false); }
+}
+
+async function compute(i) {
+  setStatus(i, "Calcul…");
+  try {
+    const r = await fetch(`${base()}/calibration/lens/compute/${i}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+      setStatus(i, `✓ Calibré ! Erreur ${d.reprojection_error}px (${d.captures} captures)`, true);
+      document.getElementById(`cnt${i}`).textContent = 0;
+      fetch(`${base()}/calibration/reload`, { method: 'POST' });
+    } else {
+      setStatus(i, d.detail || "Échec", false);
+    }
+  } catch (e) {
+    const msg = await e?.message;
+    setStatus(i, "Pas assez de captures (15 min)", false);
+  }
+}
+
+async function reset(i) {
+  await fetch(`${base()}/calibration/lens/reset/${i}`, { method: 'POST' });
+  document.getElementById(`cnt${i}`).textContent = 0;
+  setStatus(i, "Réinitialisé");
+}
+
+function setStatus(i, msg, ok) {
+  const el = document.getElementById(`st${i}`);
+  el.textContent = msg;
+  el.className = 'status ' + (ok === true ? 'ok' : ok === false ? 'bad' : '');
+}
+
+document.getElementById('grid').innerHTML = [0, 1, 2].map(camCard).join('');
+const saved = localStorage.getItem('rpi_ip');
+if (saved) document.getElementById('ip').value = saved;
+document.getElementById('ip').addEventListener('change', e => localStorage.setItem('rpi_ip', e.target.value));
+refreshStreams();
+setInterval(refreshStreams, 2000);
+</script>
+</body>
+</html>

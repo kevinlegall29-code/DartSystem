@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Damier de calibration — DartSystem</title>
+  <style>
+    @page { size: A4 landscape; margin: 8mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; }
+    .info { padding: 6mm; font-size: 12px; color: #333; }
+    .info b { color: #0000FF; }
+    table { border-collapse: collapse; margin: 0 auto; }
+    td { width: 28mm; height: 28mm; }
+    /* Bleu pur : pas d'encre noire, quasi-noir en niveaux de gris */
+    .b { background: #0000FF; }
+    .w { background: #FFFFFF; }
+    @media print { .info { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="info">
+    <p>Damier de calibration distorsion — <b>9 × 6 cases</b> (8×5 coins intérieurs).</p>
+    <p>Imprime cette page (A4 paysage, 100% / pas de mise à l'échelle), colle-la sur un support <b>plat et rigide</b> (carton).</p>
+    <p>Le bleu s'imprime sans encre noire et est détecté comme du noir par les caméras.</p>
+  </div>
+  <table id="grid"></table>
+
+  <script>
+    // 9 colonnes × 6 lignes de cases (→ 8×5 coins intérieurs, comme lens.py)
+    const COLS = 9, ROWS = 6;
+    const t = document.getElementById('grid');
+    for (let r = 0; r < ROWS; r++) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < COLS; c++) {
+        const td = document.createElement('td');
+        td.className = ((r + c) % 2 === 0) ? 'b' : 'w';
+        tr.appendChild(td);
+      }
+      t.appendChild(tr);
+    }
+  </script>
+</body>
+</html>

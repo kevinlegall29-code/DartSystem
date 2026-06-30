@@ -74,6 +74,40 @@ async def calibrate_board(req: BoardCalibRequest):
     }
 
 
+@router.post("/lens/capture/{camera_index}")
+async def lens_capture_frame(camera_index: int):
+    """Capture une frame et tente de détecter le damier (distorsion)."""
+    from api.routes.cameras import camera_manager
+    from detection.calibration.lens import lens_capture
+    cam = camera_manager.cameras.get(camera_index)
+    if cam is None:
+        raise HTTPException(503, f"Caméra {camera_index} indisponible")
+    frame = cam.read()
+    if frame is None:
+        raise HTTPException(503, "Frame indisponible")
+    found, count = lens_capture(camera_index, frame)
+    return {"found": found, "count": count}
+
+
+@router.post("/lens/compute/{camera_index}")
+async def lens_compute_cam(camera_index: int):
+    """Calcule et sauvegarde la calibration distorsion de la caméra."""
+    from detection.calibration.lens import lens_compute
+    try:
+        result = lens_compute(camera_index, DATA_DIR)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"success": True, "reprojection_error": result["reprojection_error"],
+            "captures": result["captures_used"]}
+
+
+@router.post("/lens/reset/{camera_index}")
+async def lens_reset_cam(camera_index: int):
+    from detection.calibration.lens import lens_reset, lens_count
+    lens_reset(camera_index)
+    return {"count": lens_count(camera_index)}
+
+
 @router.get("/status")
 async def calibration_status():
     """Retourne le statut de calibration de chaque caméra."""
