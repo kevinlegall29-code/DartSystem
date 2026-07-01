@@ -215,12 +215,14 @@ class GameEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ---------------- Football (doubles = possession + buts) ----------------
+  // ---------------- Football (bull = possession + buts) ----------------
+  // Un BULL (simple 25 suffit, ou double 50) prend/garde la possession et marque.
   void _footballDart(String label, int multiplier) {
     final p = players[current];
     p.dartsThrown++;
     const goalsToWin = 10;
-    if (multiplier == 2) {           // un double
+    final isBull = baseFromLabel(label) == 25;   // BULL (25) ou DBULL (50)
+    if (isBull) {
       if (possession == current) {
         p.score++;                   // but !
         message = "⚽ BUT ! ${p.name} : ${p.score}";

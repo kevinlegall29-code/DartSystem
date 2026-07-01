@@ -30,23 +30,69 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
         child: SafeArea(
-          child: ble.status != BleStatus.connected
-              ? _ConnectView(ble: ble, title: clientName)
-              : Column(children: [
-                  Expanded(
-                    child: (game.active || game.winner != null)
-                        ? _GameView(game: game)
-                        : _SetupView(game: game, title: clientName),
-                  ),
-                  _BottomBar(ble: ble),
-                ]),
+          child: _buildBody(ble, game, clientName),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(DartBle ble, GameEngine game, String clientName) {
+    final connected = ble.status == BleStatus.connected;
+    final gameOngoing = game.active || game.winner != null;
+
+    // Pas de partie en cours + pas connecté → écran de connexion initial.
+    if (!connected && !gameOngoing) {
+      return _ConnectView(ble: ble, title: clientName);
+    }
+    // Sinon on garde l'écran (setup/partie) et on affiche un bandeau si BLE coupé.
+    return Column(children: [
+      if (!connected) _DisconnectBanner(ble: ble),
+      Expanded(
+        child: gameOngoing
+            ? _GameView(game: game)
+            : _SetupView(game: game, title: clientName),
+      ),
+      _BottomBar(ble: ble),
+    ]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Bandeau de déconnexion Bluetooth (n'interrompt pas la partie).
+class _DisconnectBanner extends StatelessWidget {
+  final DartBle ble;
+  const _DisconnectBanner({required this.ble});
+  @override
+  Widget build(BuildContext context) {
+    final reconnecting =
+        ble.status == BleStatus.scanning || ble.status == BleStatus.connecting;
+    return Material(
+      color: Colors.redAccent.withValues(alpha: .16),
+      child: InkWell(
+        onTap: reconnecting ? null : ble.connect,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            if (reconnecting)
+              const SizedBox(width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent))
+            else
+              const Icon(Icons.bluetooth_disabled, color: Colors.redAccent, size: 18),
+            const SizedBox(width: 10),
+            Expanded(child: Text(
+              reconnecting
+                  ? "Bluetooth déconnecté — reconnexion…"
+                  : "Bluetooth déconnecté — appuie pour reconnecter",
+              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600, fontSize: 13))),
+            if (!reconnecting)
+              const Icon(Icons.refresh, color: Colors.redAccent, size: 18),
+          ]),
         ),
       ),
     );
   }
 }
-
-// ---------------------------------------------------------------------------
 
 class _BottomBar extends StatelessWidget {
   final DartBle ble;
@@ -152,7 +198,7 @@ class _SetupView extends StatefulWidget {
 
 class _SetupViewState extends State<_SetupView> {
   String mode = "501";
-  bool doubleOut = true;
+  bool doubleOut = false;   // désélectionné par défaut
   final players = <TextEditingController>[
     TextEditingController(text: "Joueur 1"),
     TextEditingController(text: "Joueur 2"),

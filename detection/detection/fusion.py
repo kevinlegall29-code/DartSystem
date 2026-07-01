@@ -171,6 +171,10 @@ def fuse_detections(
         # Debug : longueur de ligne (fiabilité) par caméra
         logger.info(f"[CAM{cam_idx}] ligne longueur={line[2]:.0f}px (poids fiabilité)")
 
+    # Longueur de ligne = fiabilité : une flèche vue de profil (ligne longue) situe
+    # mieux la pointe qu'une flèche vue de bout (caméra du dessus, ligne courte).
+    lengths = dict(zip(cam_indices, [l[2] for l in lines]))
+
     # CONSENSUS INTER-CAMÉRAS + REJET D'OUTLIER.
     # Chaque caméra propose ses 2 bouts. La vraie pointe se projette au même
     # endroit depuis toutes les caméras (les flights divergent). On cherche la
@@ -212,12 +216,17 @@ def fuse_detections(
                 inliers = {c: p for c, p in group.items()
                            if np.linalg.norm(p - med) < AGREE_TOL}
                 if len(inliers) >= 2:
-                    ipts = np.array(list(inliers.values()))
+                    inlier_cams = list(inliers.keys())
+                    ipts = np.array([inliers[c] for c in inlier_cams])
                     spread = float(max(np.linalg.norm(a - b) for a in ipts for b in ipts))
                     key = (len(inliers), -spread)
                     if key > best_key:
                         best_key = key
-                        best = (ipts.mean(axis=0), list(inliers.keys()))
+                        # Moyenne PONDÉRÉE par la longueur de ligne² (fiabilité) :
+                        # la caméra du dessus (ligne courte) pèse moins.
+                        w = np.array([max(lengths[c], 1.0) ** 2 for c in inlier_cams])
+                        wmean = (ipts * w[:, None]).sum(axis=0) / w.sum()
+                        best = (wmean, inlier_cams)
 
     if best is not None:
         # Consensus multi-caméras (le plus fiable)
@@ -225,7 +234,6 @@ def fuse_detections(
         confidence, agreement, method = 0.9, True, "consensus"
     else:
         # Aucun accord → meilleure caméra (ligne la plus longue), pointe = corners[0]
-        lengths = dict(zip(cam_indices, [l[2] for l in lines]))
         onboard_cams = [c for c in cam_indices if cand[c]]
         if not onboard_cams:
             logger.info("FUSION : aucun point plausible dans le board")
