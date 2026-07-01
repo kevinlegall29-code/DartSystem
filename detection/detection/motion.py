@@ -74,6 +74,13 @@ class MotionDetector:
         self._in_motion  = False
         self._stable_count = 0
 
+    def set_reference_gray(self, gray: np.ndarray):
+        """Pose la référence depuis un gris déjà préparé (ex: board-vide sauvegardé)."""
+        self._reference  = gray
+        self._prev_frame = gray
+        self._in_motion  = False
+        self._stable_count = 0
+
     def process(self, frame: np.ndarray) -> MotionResult:
         gray = self._to_gray(frame)
 

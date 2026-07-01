@@ -285,6 +285,7 @@
   <button class="btn danger" onclick="disconnect()">Déconnecter</button>
   <button class="btn secondary" onclick="reloadCalib()">↺ Recharger calibrations</button>
   <button class="btn secondary" onclick="resetDarts()">Effacer tour</button>
+  <button class="btn secondary" onclick="captureEmpty()" title="À faire board VIDE">📸 Board vide</button>
   <label style="margin-left:16px; color:#8b949e;">Exposition :</label>
   <input type="range" id="exposure-slider" min="50" max="5000" value="500" step="50"
          style="width:120px; accent-color:#388bfd;"
@@ -625,6 +626,22 @@
       .then(r => r.json())
       .then(d => log(`Exposition réglée à ${value} — ${JSON.stringify(d.cameras)}`, 'state'))
       .catch(() => log(`Erreur réglage exposition`, 'error'));
+  }
+
+  function captureEmpty() {
+    if (!baseUrl) return;
+    fetch(`${baseUrl}/calibration/empty`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.all_empty) {
+          log(`✓ Board vide capturé sur les 3 caméras`, 'state');
+        } else {
+          const busy = Object.entries(d.cameras || {})
+            .filter(([, s]) => !s.empty).map(([i, s]) => `cam${i} (${s.nonzero}px)`);
+          log(`⚠ Fléchettes détectées sur ${busy.join(', ')} — retire-les puis recapture`, 'error');
+        }
+      })
+      .catch(() => log(`Erreur capture board vide`, 'error'));
   }
 
   // Restaure la dernière IP connue

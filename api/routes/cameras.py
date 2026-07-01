@@ -61,14 +61,17 @@ async def set_exposure(value: int, request=None):
     _apply_exposure(value)
     cfg.save({"exposure": value})
 
-    # Réinitialise les références du moteur pour éviter les fausses détections
+    # Recapture la référence board-vide (anti-pollution : ignore la vue si des
+    # fléchettes sont plantées). Petite pause pour laisser l'expo s'appliquer.
+    status = {}
     try:
         engine = app.state.engine
-        await engine._init_references()
+        await asyncio.sleep(1.0)
+        status = engine.recapture_reference()
     except Exception:
         pass
 
-    return {"exposure": value, "saved": True}
+    return {"exposure": value, "saved": True, "cameras": status}
 
 
 @router.get("/snapshot/{camera_index}")

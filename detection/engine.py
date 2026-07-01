@@ -14,6 +14,9 @@ import numpy as np
 from detection.cameras.stream import CameraManager
 from detection.calibration.lens import load_lens_calibration, undistort
 from detection.calibration.board import load_board_calibration, normalize_frame
+from detection.calibration.empty_ref import (
+    load_empty_reference, save_empty_reference, board_has_darts,
+)
 from detection.detection.motion import MotionDetector, MotionState
 from detection.detection.corners import detect_dart_location
 from detection.detection.fusion import fuse_detections
@@ -161,13 +164,45 @@ class DetectionEngine:
     async def _init_references(self):
         """Capture les frames initiales comme référence (board vide)."""
         await asyncio.sleep(1.0)   # Laisse les caméras se stabiliser
+        self._set_references_from_current(save_golden=True)
+        logger.info("Références de mouvement initialisées")
+
+    def _set_references_from_current(self, save_golden: bool) -> dict:
+        """
+        (Re)pose les références de détection depuis la vue actuelle.
+
+        Sécurité anti-pollution : si des fléchettes sont détectées sur le board
+        ET qu'un "board-vide" est sauvegardé sur disque, on réutilise CE dernier
+        au lieu de capturer une référence polluée. Le board-vide n'est mis à jour
+        que quand le board est réellement vide.
+
+        Retourne {cam_idx: {"empty": bool, "nonzero": int}}.
+        """
+        status = {}
         frames = self.cameras.read_all()
         for idx, frame in frames.items():
-            if frame is not None:
+            if frame is None:
+                continue
+            golden = load_empty_reference(idx, DATA_DIR)
+            has_darts, nz = board_has_darts(frame, golden)
+            status[idx] = {"empty": not has_darts, "nonzero": nz}
+            if golden is not None and has_darts:
+                logger.warning(f"cam{idx}: fléchettes détectées ({nz}px) → "
+                               f"référence = board-vide sauvegardé (vue actuelle ignorée)")
+                self._motion[idx].set_reference_gray(golden)
+                self._empty_reference[idx] = golden
+            else:
                 processed = self._preprocess(frame, idx)
                 self._motion[idx].set_reference(processed)
                 self._empty_reference[idx] = self._gray(processed)
-        logger.info("Références de mouvement initialisées")
+                if save_golden:
+                    save_empty_reference(idx, frame, DATA_DIR)
+        return status
+
+    def recapture_reference(self) -> dict:
+        """Recapture la référence board-vide (bouton dashboard / changement d'expo).
+        Ne met à jour le board-vide sauvegardé que si le board est vide."""
+        return self._set_references_from_current(save_golden=True)
 
     def _gray(self, frame: np.ndarray) -> np.ndarray:
         g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -502,14 +537,10 @@ class DetectionEngine:
             logger.info("Board nettoyé (aucune fléchette comptée) → recapture référence")
 
         # Dans TOUS les cas : attend la stabilité puis recapture une référence
-        # board-vide propre. Corrige le cas des fléchettes déjà plantées au boot.
+        # board-vide propre (et met à jour le board-vide sauvegardé sur disque).
+        # L'anti-pollution protège si des fléchettes sont encore là.
         await self._wait_until_stable()
-        frames = self.cameras.read_all()
-        for idx, frame in frames.items():
-            if frame is not None:
-                processed = self._preprocess(frame, idx)
-                self._motion[idx].set_reference(processed)
-                self._empty_reference[idx] = self._gray(processed)
+        self._set_references_from_current(save_golden=True)
         logger.info("Référence board vide recapturée")
 
     def reset_turn(self):

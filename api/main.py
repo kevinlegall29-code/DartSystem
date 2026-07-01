@@ -104,6 +104,23 @@ async def ui_page(page: str):
 
 @app.post("/calibration/reload")
 async def reload_calibrations():
-    """Recharge les calibrations à chaud après recalibration depuis l'app."""
+    """Recharge les calibrations + capture le board-vide (fin de calibration)."""
     app.state.engine.reload_calibrations()
-    return {"success": True}
+    status = {}
+    try:
+        status = app.state.engine.recapture_reference()
+    except Exception:
+        pass
+    return {"success": True, "cameras": status}
+
+
+@app.post("/calibration/empty")
+async def capture_empty_board():
+    """Capture/rafraîchit le board-vide de référence (bouton dédié).
+    Ignore les caméras où des fléchettes sont détectées (pas de pollution)."""
+    try:
+        status = app.state.engine.recapture_reference()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    all_empty = all(s.get("empty", False) for s in status.values()) if status else False
+    return {"success": True, "all_empty": all_empty, "cameras": status}
