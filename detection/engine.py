@@ -85,7 +85,7 @@ class DetectionEngine:
 
         self._running = False
         self._darts_this_turn = 0
-        self._empty_confirm = 0    # frames consécutives board vide (auto-reset compteur)
+        self._empty_since = 0.0    # timestamp début board-vide (auto-reset compteur)
         self._last_dart_time = 0.0
         self._takeout_time = 0.0   # timestamp du dernier retrait
         self._takeout_cooldown = 1.5  # secondes à ignorer après retrait
@@ -272,23 +272,25 @@ class DetectionEngine:
             await self._handle_takeout()
             return
 
-        # Auto-reset du compteur de volée si le board est revenu VIDE (toutes
-        # caméras) un court instant. Évite que la 1re volée d'une partie soit
-        # bloquée par un compteur resté à 3 (lancers de test, partie quittée
-        # sans retrait…). Ne se déclenche jamais tant qu'une fléchette est plantée.
+        # Auto-reset du compteur SEULEMENT si le board reste VIDE longtemps (5s).
+        # But : débloquer la 1re volée quand le compteur est resté à 3 (test,
+        # partie quittée sans retrait). Conservateur : le retrait normal (gros
+        # mouvement) se déclenche en 1-2s → il gagne toujours dans le flux normal.
+        # Ne touche donc jamais une volée en cours.
+        now_e = time.time()
         board_empty = bool(motion_results) and all(
             r.nonzero_ref < self._motion[idx].min_dart_px
             for idx, (r, _) in motion_results.items())
-        if (self._darts_this_turn > 0 and board_empty
-                and not motion_cameras and not stable_cameras and not takeout_cameras
-                and (time.time() - self._last_dart_time) > 1.5):
-            self._empty_confirm += 1
-            if self._empty_confirm >= 8:
-                print(f"[ENGINE] Board vide → reset compteur ({self._darts_this_turn}→0)", flush=True)
+        if (board_empty and not motion_cameras and not stable_cameras
+                and not takeout_cameras and (now_e - self._last_dart_time) > 3.0):
+            if self._empty_since == 0.0:
+                self._empty_since = now_e
+            elif now_e - self._empty_since > 5.0 and self._darts_this_turn > 0:
+                print(f"[ENGINE] Board vide prolongé → reset compteur ({self._darts_this_turn}→0)", flush=True)
                 self._darts_this_turn = 0
-                self._empty_confirm = 0
+                self._empty_since = now_e
         else:
-            self._empty_confirm = 0
+            self._empty_since = 0.0
 
         # Ignore DART_STABLE pendant le cooldown post-retrait
         in_cooldown = (time.time() - self._takeout_time) < self._takeout_cooldown
