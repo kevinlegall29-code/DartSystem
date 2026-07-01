@@ -66,7 +66,12 @@ def board_has_darts(current: np.ndarray, golden_gray: np.ndarray | None) -> tupl
 
     diff = cv2.absdiff(cf, golden_gray)
     _, th = cv2.threshold(diff, 35, 255, cv2.THRESH_BINARY)
-    # Nettoie le bruit isolé (petits points) pour ne garder que les vraies formes
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    nz = int(cv2.countNonZero(th))
-    return nz > DART_PRESENT_PX, nz
+    # Érosion forte : supprime les FINES lignes de désalignement (bords de secteurs
+    # décalés de 1-2px) tout en gardant les FORMES ÉPAISSES (fléchettes).
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    # Ne compte que les gros blobs compacts (une fléchette est un objet de bonne
+    # taille) — ignore les petits résidus dispersés dus au bruit/alignement.
+    n, _, stats, _ = cv2.connectedComponentsWithStats(th, connectivity=8)
+    dart_px = sum(int(stats[i, cv2.CC_STAT_AREA]) for i in range(1, n)
+                  if stats[i, cv2.CC_STAT_AREA] > 200)
+    return dart_px > DART_PRESENT_PX, dart_px
